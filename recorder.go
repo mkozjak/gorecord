@@ -1,0 +1,337 @@
+package main
+
+import (
+	"code.google.com/p/gcfg"
+	"code.google.com/p/go.net/ipv4"
+	"encoding/json"
+	"fmt"
+	"github.com/syndtr/goleveldb/leveldb"
+	"net"
+	"net/rpc"
+	"net/rpc/jsonrpc"
+	"os"
+	"time"
+)
+
+type Config struct {
+	Main struct {
+		Interface  string
+		Port       string
+		Location   string
+		Timelayout string
+	}
+}
+
+type Database struct {
+	inst *leveldb.DB
+	err  error
+}
+
+type GenericReply struct {
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+	Error       error  `json:"error,omitempty"`
+}
+
+type RecParams struct {
+	Status       string `json:"status,omitempty"`
+	Client       string `json:"client,omitempty"`
+	RecordingUid string `json:"recording_uid,omitempty"`
+	ChannelUid   string `json:"channel_uid,omitempty"`
+	Start        string `json:"start,omitempty"`
+	End          string `json:"end,omitempty"`
+	Id           int    `json:"id,omitempty"`
+}
+
+type ChParams struct {
+	Status     string `json:"status,omitempty"`
+	Client     string `json:"client,omitempty"`
+	ChannelUid string `json:"channel_uid,omitempty"`
+	Address    string `json:"address,omitempty"`
+	Port       string `json:"port,omitempty"`
+}
+
+type TaskProps struct {
+	Timer      *time.Timer
+	Start      int64
+	End        int64
+	ChannelUid string
+}
+
+type Methods struct {
+	db    *Database
+	loc   *time.Location
+	cfg   *Config
+	iface *net.Interface
+	tasks map[string]*TaskProps
+}
+
+func (m *Methods) Init(cfg *Config) error {
+	var err error
+
+	// Connect to persistent key/value store
+	m.db = &Database{}
+	m.db.inst, err = leveldb.OpenFile("db", nil)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Database opened")
+
+	// Get recording interface
+	m.iface, err = net.InterfaceByName(cfg.Main.Interface)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Capture interface configured")
+	m.cfg = cfg
+
+	// Initiate tasks store
+	m.tasks = make(map[string]*TaskProps)
+
+	return nil
+}
+
+func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
+	j, err := json.Marshal(params)
+	if err != nil {
+		fmt.Println("AddChannel json.Marshal error:", err)
+		*reply = GenericReply{Status: "error"}
+		return err
+	}
+
+	has, err := m.db.inst.Has([]byte(params.ChannelUid), nil)
+	if err != nil {
+		// TODO: continue or break?
+		fmt.Println("AddChannel m.db.inst.Has error:", err)
+		*reply = GenericReply{Status: "error"}
+		return err
+	}
+	if has == false {
+		fmt.Println("Adding new channel")
+		if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
+			fmt.Println("AddChannel json.Marshal error:", err)
+			*reply = GenericReply{Status: "error"}
+			return err
+		}
+	} else {
+		*reply = GenericReply{Status: "OK", Description: "Already exists"}
+		return nil
+	}
+
+	*reply = GenericReply{Status: "OK"}
+	return nil
+}
+
+func (m *Methods) GetRecording(params, reply *RecParams) error {
+	data, err := m.db.inst.Get([]byte(params.RecordingUid), nil)
+	if err != nil {
+		fmt.Println("m.db.inst.Get error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+
+	var results RecParams
+	if err := json.Unmarshal(data, &results); err != nil {
+		fmt.Println("GetRecording json.Unmarshal error:", err)
+		return err
+	}
+
+	*reply = results
+	// fmt.Println(m.tasks[params.RecordingUid].Start, m.tasks[params.RecordingUid].End)
+	return nil
+}
+
+func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
+	j, err := json.Marshal(recData)
+	if err != nil {
+		fmt.Println("ScheduleRecording json.Marshal error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+
+	if err := m.db.inst.Put([]byte(recData.RecordingUid), j, nil); err != nil {
+		fmt.Println("m.db.inst.Put error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+
+	// Get start/end times in unix
+	uTime, err := unixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
+	if err != nil {
+		fmt.Println("unixTime error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+
+	// Get current local time in unix and duration in seconds
+	// now := time.Now().Unix()
+	// dur := uTime[recData.End] - uTime[recData.Start]
+
+	// Create a channel that will be used to talk to a goroutine
+	ch := make(chan string)
+
+	// Start timer which will trigger the recorder
+	// timer := time.AfterFunc((uTime[recData.Start]-now)*time.Second, func() {
+	timer := time.AfterFunc(2*time.Second, func() {
+		data, err := m.db.inst.Get([]byte(recData.ChannelUid), nil)
+		if err != nil {
+			fmt.Println("time.AfterFunc m.db.inst.Get error:", err)
+			return
+		}
+
+		var chdata ChParams
+		if err := json.Unmarshal(data, &chdata); err != nil {
+			fmt.Println("time.AfterFunc json.Unmarshal error:", err)
+			// FIXME: need to return err to ScheduleRecording!
+			return
+		}
+
+		// Run recorder and set a timer function to stop recording when End time is reached
+		go recorder(m.iface, recData.RecordingUid, chdata.Address, chdata.Port, ch)
+		time.AfterFunc(15*time.Second, func() {
+			ch <- "stop"
+		})
+	})
+
+	m.tasks[recData.RecordingUid] = &TaskProps{
+		Timer: timer,
+		Start: uTime[recData.Start],
+		End:   uTime[recData.End],
+	}
+
+	*reply = RecParams{Status: "OK"}
+	return nil
+}
+
+func unixTime(format string, atimes []string) (map[string]int64, error) {
+	m := make(map[string]int64)
+
+	for i, elem := range atimes {
+		t, err := time.Parse(format, elem)
+		if err != nil {
+			fmt.Println("time.Parse error:", err)
+			return nil, err
+		}
+
+		m[atimes[i]] = t.Unix()
+	}
+
+	return m, nil
+}
+
+func recorder(iface *net.Interface, uid, mcast, port string, ch <-chan string) {
+	ip := net.ParseIP(mcast)
+	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
+
+	localSock, err := net.ListenPacket("udp4", mcast+":"+port)
+	if err != nil {
+		fmt.Println("net.ListenPacket failed")
+		return
+	}
+
+	defer localSock.Close()
+	pktSock := ipv4.NewPacketConn(localSock)
+
+	if err := pktSock.SetControlMessage(ipv4.FlagDst, true); err != nil {
+		fmt.Println("pktSock.SetControlMessage failed")
+		return
+	}
+
+	if err := pktSock.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
+		fmt.Println("Failed to join mcast!")
+		return
+	}
+
+	file, err := os.OpenFile("/home/mkozjak/rec"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("error opening file for appending")
+	}
+
+	defer file.Close()
+
+	pktSock.SetMulticastInterface(iface)
+
+	fmt.Println("Recording!")
+
+REC:
+	for {
+		// Check if goroutine channel is closed and stop recording
+		select {
+		case msg := <-ch:
+			if msg == "stop" {
+				fmt.Println("Stop recording!")
+				break REC
+			}
+		default:
+			break
+		}
+
+		pkt := make([]byte, 1500)
+		n, cmsg, _, err := pktSock.ReadFrom(pkt)
+		if err != nil {
+			fmt.Println("pktSock.ReadFrom failed")
+			return
+		}
+
+		// Check if created packet buffer is too large and slice it if needed
+		if len(pkt) > n {
+			newPkt := make([]byte, n)
+			copy(newPkt, pkt)
+			pkt = newPkt
+		}
+
+		// Slice off udp header
+		pkt = pkt[12:]
+
+		// Store file
+		if cmsg.Dst.IsMulticast() {
+			if cmsg.Dst.Equal(group) {
+				_, err := file.Write(pkt)
+				if err != nil {
+					fmt.Println("error writing to file")
+					return
+				}
+			} else {
+				continue
+			}
+		}
+	}
+}
+
+func main() {
+	var cfg Config
+	if err := gcfg.ReadFileInto(&cfg, "./conf.gcfg"); err != nil {
+		fmt.Println("Error reading config file:", err)
+		os.Exit(1)
+	}
+
+	meth := Methods{}
+	if err := meth.Init(&cfg); err != nil {
+		fmt.Println("meth.Init() error:", err)
+		os.Exit(1)
+	}
+	defer meth.db.inst.Close()
+
+	sock, err := net.Listen("tcp", ":"+cfg.Main.Port)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer sock.Close()
+	fmt.Println("Listening on port " + cfg.Main.Port)
+
+	rpc.Register(&meth)
+
+	for {
+		conn, err := sock.Accept()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("New client connection from", conn.RemoteAddr().String())
+
+		go jsonrpc.ServeConn(conn)
+	}
+}
+
+// { channel_uid: 'stb_hrt1', start: '20161015111000', end: '20161015114110', _startUTCFmt: '2016-10-15 11:10:00', _endUTCFmt     : '2016-10-15 11:41:10', extId: '321543', startFmt: '2016-10-15T11:10:00+0000', endFmt: '2016-10-15T11:41:10+0000' }
