@@ -107,7 +107,7 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 		return err
 	}
 	if has == false {
-		fmt.Println("Adding new channel")
+		fmt.Println("Adding new channel:", params.ChannelUid)
 		if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
 			fmt.Println("AddChannel json.Marshal error:", err)
 			*reply = GenericReply{Status: "error"}
@@ -164,15 +164,15 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	// Get current local time in unix and duration in seconds
-	// now := time.Now().Unix()
-	// dur := uTime[recData.End] - uTime[recData.Start]
+	now := time.Now().Unix()
+	dur := uTime[recData.End] - uTime[recData.Start]
 
 	// Create a channel that will be used to talk to a goroutine
 	ch := make(chan string)
 
 	// Start timer which will trigger the recorder
-	// timer := time.AfterFunc((uTime[recData.Start]-now)*time.Second, func() {
-	timer := time.AfterFunc(2*time.Second, func() {
+	fmt.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
+	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recData.ChannelUid), nil)
 		if err != nil {
 			fmt.Println("time.AfterFunc m.db.inst.Get error:", err)
@@ -188,8 +188,12 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 
 		// Run recorder and set a timer function to stop recording when End time is reached
 		go recorder(m.iface, recData.RecordingUid, chdata.Address, chdata.Port, ch)
-		time.AfterFunc(15*time.Second, func() {
+		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
+			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error !=nil {
+				fmt.Println("time.AfterFunc m.db.inst.Delete error:", err)
+				return
+			}
 		})
 	})
 
@@ -255,7 +259,7 @@ func recorder(iface *net.Interface, uid, mcast, port string, ch <-chan string) {
 
 REC:
 	for {
-		// Check if goroutine channel is closed and stop recording
+		// Check if parent called 'stop'
 		select {
 		case msg := <-ch:
 			if msg == "stop" {
