@@ -165,6 +165,9 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 
 	// Get current local time in unix and duration in seconds
 	now := time.Now().Unix()
+	if uTime[recData.Start] <= now {
+		uTime[recData.Start] = now
+	}
 	dur := uTime[recData.End] - uTime[recData.Start]
 
 	// Create a channel that will be used to talk to a goroutine
@@ -190,7 +193,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		go recorder(m.iface, recData.RecordingUid, chdata.Address, chdata.Port, ch)
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
-			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error !=nil {
+			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error != nil {
 				fmt.Println("time.AfterFunc m.db.inst.Delete error:", err)
 				return
 			}
