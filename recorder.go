@@ -113,7 +113,6 @@ func (m *Methods) Init(cfg *Config) error {
 			fmt.Println("Init iter.Next json.Unmarshal error:", err)
 			continue
 		}
-
 		if params.Type != "recording" {
 			continue
 		}
@@ -211,10 +210,20 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 
 	// Get current local time in unix and duration in seconds
 	now := time.Now().Unix()
+	if uTime[recData.End] < now {
+		*reply = RecParams{Status: "OK", Description: "End is in past"}
+		return nil
+	}
+	if uTime[recData.Start] > uTime[recData.End] {
+		*reply = RecParams{Status: "OK", Description: "Start after end"}
+		return nil
+	}
 	if uTime[recData.Start] <= now {
 		uTime[recData.Start] = now
 	}
 	dur := uTime[recData.End] - uTime[recData.Start]
+	recCh := recData.ChannelUid
+	recUid := recData.RecordingUid
 
 	// Create a channel that will be used to talk to a goroutine
 	ch := make(chan string)
@@ -222,9 +231,9 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	// Start timer which will trigger the recording goroutine
 	fmt.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
-		data, err := m.db.inst.Get([]byte(recData.ChannelUid), nil)
+		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
-			fmt.Println("time.AfterFunc m.db.inst.Get error:", err)
+			fmt.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ":" + err.Error())
 			return
 		}
 
@@ -236,9 +245,10 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
-		go Recorder(m.iface, m.cfg.Main.Mediadir, recData.RecordingUid, chdata.Address, chdata.Port, ch)
+		go Recorder(m.iface, m.cfg.Main.Mediadir, recUid, chdata.Address, chdata.Port, ch)
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
+
 			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error != nil {
 				fmt.Println("time.AfterFunc m.db.inst.Delete error:", err)
 				return
@@ -332,9 +342,10 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port string, ch <-chan s
 		return
 	}
 
+	// TODO: check if file already exists and mv old (?)
 	file, err := os.OpenFile(recdir+"/"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("error opening file for appending")
+		fmt.Println("error opening file for appending", err)
 	}
 
 	defer file.Close()
