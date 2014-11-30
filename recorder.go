@@ -35,6 +35,7 @@ type GenericReply struct {
 
 type RecParams struct {
 	Status       string `json:"status,omitempty"`
+	Description  string `json:"description,omitempty"`
 	Client       string `json:"client,omitempty"`
 	RecordingUid string `json:"recording_uid,omitempty"`
 	ChannelUid   string `json:"channel_uid,omitempty"`
@@ -44,11 +45,12 @@ type RecParams struct {
 }
 
 type ChParams struct {
-	Status     string `json:"status,omitempty"`
-	Client     string `json:"client,omitempty"`
-	ChannelUid string `json:"channel_uid,omitempty"`
-	Address    string `json:"address,omitempty"`
-	Port       string `json:"port,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+	Client      string `json:"client,omitempty"`
+	ChannelUid  string `json:"channel_uid,omitempty"`
+	Address     string `json:"address,omitempty"`
+	Port        string `json:"port,omitempty"`
 }
 
 type TaskProps struct {
@@ -124,8 +126,11 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 
 func (m *Methods) GetRecording(params, reply *RecParams) error {
 	data, err := m.db.inst.Get([]byte(params.RecordingUid), nil)
-	if err != nil {
-		fmt.Println("m.db.inst.Get error:", err)
+	if err != nil && err.Error() == "leveldb: not found" {
+		*reply = RecParams{Status: "OK", Description: "Not found"}
+		return nil
+	} else if err != nil {
+		fmt.Println("GetRecording m.db.inst.Get error:", err)
 		*reply = RecParams{Status: "error"}
 		return err
 	}
@@ -207,6 +212,38 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	*reply = RecParams{Status: "OK"}
+	return nil
+}
+
+func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error {
+	// Stop and delete a scheduled task (timer)
+	if _, ok := m.tasks[params.RecordingUid]; ok {
+		s := m.tasks[params.RecordingUid].Timer.Stop()
+		if s == true {
+			fmt.Println("Task " + params.RecordingUid + " stopped")
+		} else {
+			fmt.Println("Task " + params.RecordingUid + "already stopped or expired")
+		}
+
+		// Delete a task (timer) from pool
+		delete(m.tasks, params.RecordingUid)
+	}
+
+	// Delete asset from db
+	if err := m.db.inst.Delete([]byte(params.RecordingUid), nil); err != nil {
+		fmt.Println("DeleteRecording m.db.inst.Delete error:", err)
+		return err
+	}
+
+	// Delete file from fs (if it exists)
+	if _, err := os.Stat("/home/mkozjak/rec" + params.RecordingUid); os.IsExist(err) {
+		if err := os.Remove("/home/mkozjak/rec" + params.RecordingUid); err != nil {
+			fmt.Println("DeleteRecording os.Remove error:", err)
+			return err
+		}
+	}
+
+	*reply = GenericReply{Status: "OK"}
 	return nil
 }
 
