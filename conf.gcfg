@@ -3,3 +3,4 @@ interface = eth0
 port = 2000
 location = Europe/Zagreb
 timelayout = 2006-01-02T15:04:05-0700
+mediadir = /home/mkozjak/tmp

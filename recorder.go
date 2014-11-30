@@ -13,29 +13,35 @@ import (
 	"time"
 )
 
+// Config represents main configuration parameters.
 type Config struct {
 	Main struct {
 		Interface  string
 		Port       string
 		Location   string
 		Timelayout string
+		Mediadir   string
 	}
 }
 
+// Database represents a database instance storage.
 type Database struct {
 	inst *leveldb.DB
 	err  error
 }
 
+// GenericReply represents a generic jsonrpc reply content.
 type GenericReply struct {
 	Status      string `json:"status,omitempty"`
 	Description string `json:"description,omitempty"`
 	Error       error  `json:"error,omitempty"`
 }
 
+// RecParams represents recordings parameters.
 type RecParams struct {
 	Status       string `json:"status,omitempty"`
 	Description  string `json:"description,omitempty"`
+	Type         string `json:"type,omitempty"`
 	Client       string `json:"client,omitempty"`
 	RecordingUid string `json:"recording_uid,omitempty"`
 	ChannelUid   string `json:"channel_uid,omitempty"`
@@ -44,15 +50,18 @@ type RecParams struct {
 	Id           int    `json:"id,omitempty"`
 }
 
+// ChParams represents channel parameters.
 type ChParams struct {
 	Status      string `json:"status,omitempty"`
 	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"`
 	Client      string `json:"client,omitempty"`
 	ChannelUid  string `json:"channel_uid,omitempty"`
 	Address     string `json:"address,omitempty"`
 	Port        string `json:"port,omitempty"`
 }
 
+// TaskProps represents scheduled task properties.
 type TaskProps struct {
 	Timer      *time.Timer
 	Start      int64
@@ -60,6 +69,7 @@ type TaskProps struct {
 	ChannelUid string
 }
 
+// Methods represents a collection of methods used by jsonrpc.
 type Methods struct {
 	db    *Database
 	loc   *time.Location
@@ -68,6 +78,9 @@ type Methods struct {
 	tasks map[string]*TaskProps
 }
 
+// Init initiates a persistent key/value store, sets a recording interface
+// and declares a tasks map to store scheduled jobs.
+// It returns an error if any init operation fails.
 func (m *Methods) Init(cfg *Config) error {
 	var err error
 
@@ -90,10 +103,33 @@ func (m *Methods) Init(cfg *Config) error {
 	// Initiate tasks store
 	m.tasks = make(map[string]*TaskProps)
 
+	// Reschedule unfinished tasks
+	iter := m.db.inst.NewIterator(nil, nil)
+	for iter.Next() {
+		value := iter.Value()
+		params := RecParams{}
+
+		if err := json.Unmarshal(value, &params); err != nil {
+			fmt.Println("Init iter.Next json.Unmarshal error:", err)
+			continue
+		}
+
+		if params.Type != "recording" {
+			continue
+		}
+		if err := m.ScheduleRecording(&params, &params); err != nil {
+			fmt.Println("Error (re)scheduling:", err)
+		}
+	}
+	iter.Release()
+
 	return nil
 }
 
+// AddChannel method is used to add new channels to persistent store.
+// This method is rpc.Register compliant.
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
+	params.Type = "channel"
 	j, err := json.Marshal(params)
 	if err != nil {
 		fmt.Println("AddChannel json.Marshal error:", err)
@@ -124,6 +160,8 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 	return nil
 }
 
+// GetRecording method returns all recording parameters for a given id.
+// This method is rpc.Register compliant.
 func (m *Methods) GetRecording(params, reply *RecParams) error {
 	data, err := m.db.inst.Get([]byte(params.RecordingUid), nil)
 	if err != nil && err.Error() == "leveldb: not found" {
@@ -146,7 +184,10 @@ func (m *Methods) GetRecording(params, reply *RecParams) error {
 	return nil
 }
 
+// ScheduleRecording method schedules a given recording according to provided parameters.
+// This method is rpc.Register compliant.
 func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
+	recData.Type = "recording"
 	j, err := json.Marshal(recData)
 	if err != nil {
 		fmt.Println("ScheduleRecording json.Marshal error:", err)
@@ -161,9 +202,9 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	// Get start/end times in unix
-	uTime, err := unixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
+	uTime, err := UnixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
 	if err != nil {
-		fmt.Println("unixTime error:", err)
+		fmt.Println("UnixTime error:", err)
 		*reply = RecParams{Status: "error"}
 		return err
 	}
@@ -178,7 +219,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	// Create a channel that will be used to talk to a goroutine
 	ch := make(chan string)
 
-	// Start timer which will trigger the recorder
+	// Start timer which will trigger the recording goroutine
 	fmt.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recData.ChannelUid), nil)
@@ -194,8 +235,8 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 			return
 		}
 
-		// Run recorder and set a timer function to stop recording when End time is reached
-		go recorder(m.iface, recData.RecordingUid, chdata.Address, chdata.Port, ch)
+		// Run Recorder and set a timer function to stop recording when End time is reached
+		go Recorder(m.iface, m.cfg.Main.Mediadir, recData.RecordingUid, chdata.Address, chdata.Port, ch)
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error != nil {
@@ -215,12 +256,14 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	return nil
 }
 
+// DeleteRecording method deletes a recording according to provided parameters.
+// This method is rpc.Register compliant.
 func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error {
 	// Stop and delete a scheduled task (timer)
 	if _, ok := m.tasks[params.RecordingUid]; ok {
 		s := m.tasks[params.RecordingUid].Timer.Stop()
 		if s == true {
-			fmt.Println("Task " + params.RecordingUid + " stopped")
+			fmt.Println("Task " + params.RecordingUid + " stopped and removed")
 		} else {
 			fmt.Println("Task " + params.RecordingUid + "already stopped or expired")
 		}
@@ -236,8 +279,8 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 	}
 
 	// Delete file from fs (if it exists)
-	if _, err := os.Stat("/home/mkozjak/rec" + params.RecordingUid); os.IsExist(err) {
-		if err := os.Remove("/home/mkozjak/rec" + params.RecordingUid); err != nil {
+	if _, err := os.Stat(m.cfg.Main.Mediadir + "/" + params.RecordingUid); os.IsExist(err) {
+		if err := os.Remove(m.cfg.Main.Mediadir + "/" + params.RecordingUid); err != nil {
 			fmt.Println("DeleteRecording os.Remove error:", err)
 			return err
 		}
@@ -247,7 +290,9 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 	return nil
 }
 
-func unixTime(format string, atimes []string) (map[string]int64, error) {
+// UnixTime returns a map of times converted to unix.
+// Returns an error if parsing of provided strings fails.
+func UnixTime(format string, atimes []string) (map[string]int64, error) {
 	m := make(map[string]int64)
 
 	for i, elem := range atimes {
@@ -263,7 +308,8 @@ func unixTime(format string, atimes []string) (map[string]int64, error) {
 	return m, nil
 }
 
-func recorder(iface *net.Interface, uid, mcast, port string, ch <-chan string) {
+// Recorder function uses the provided network interface and url to record content.
+func Recorder(iface *net.Interface, recdir, uid, mcast, port string, ch <-chan string) {
 	ip := net.ParseIP(mcast)
 	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
 
@@ -286,7 +332,7 @@ func recorder(iface *net.Interface, uid, mcast, port string, ch <-chan string) {
 		return
 	}
 
-	file, err := os.OpenFile("/home/mkozjak/rec"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(recdir+"/"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("error opening file for appending")
 	}
@@ -377,5 +423,3 @@ func main() {
 		go jsonrpc.ServeConn(conn)
 	}
 }
-
-// { channel_uid: 'stb_hrt1', start: '20161015111000', end: '20161015114110', _startUTCFmt: '2016-10-15 11:10:00', _endUTCFmt     : '2016-10-15 11:41:10', extId: '321543', startFmt: '2016-10-15T11:10:00+0000', endFmt: '2016-10-15T11:41:10+0000' }
