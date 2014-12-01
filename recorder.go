@@ -209,7 +209,6 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	recData.Type = "recording"
-	// FIXME: update database, not recData
 	recData.Status = "processing"
 	j, err := json.Marshal(recData)
 	if err != nil {
@@ -246,8 +245,14 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		uTime[recData.Start] = now
 	}
 	dur := uTime[recData.End] - uTime[recData.Start]
+	// HACK: only needed for Init to call this function
+	recType := recData.Type
+	recClient := recData.Client
 	recCh := recData.ChannelUid
 	recUid := recData.RecordingUid
+	recStart := recData.Start
+	recEnd := recData.End
+	recId := recData.Id
 
 	// Create a channel that will be used to talk to a goroutine
 	ch := make(chan string)
@@ -273,9 +278,29 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
-			// FIXME: update database, not recData
-			recData.Status = "ready"
-			delete(m.tasks, recData.RecordingUid)
+			uparams := RecParams{
+				Status:       "ready",
+				Type:         recType,
+				Client:       recClient,
+				RecordingUid: recUid,
+				ChannelUid:   recCh,
+				Start:        recStart,
+				End:          recEnd,
+				Id:           recId,
+			}
+			j, err := json.Marshal(uparams)
+			if err != nil {
+				fmt.Println("ScheduleRecording json.Marshal error:", err)
+				// FIXME: need to return err to ScheduleRecording!
+				return
+			}
+			if err := m.db.inst.Put([]byte(recUid), j, nil); err != nil {
+				fmt.Println("m.db.inst.Put error:", err)
+				// FIXME: need to return err to ScheduleRecording!
+				return
+			}
+
+			delete(m.tasks, recUid)
 		})
 	})
 
