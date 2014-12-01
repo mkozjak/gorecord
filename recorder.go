@@ -64,6 +64,7 @@ type ChParams struct {
 // TaskProps represents scheduled task properties.
 type TaskProps struct {
 	Timer      *time.Timer
+	Channel    chan string
 	Start      int64
 	End        int64
 	ChannelUid string
@@ -257,9 +258,10 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	})
 
 	m.tasks[recData.RecordingUid] = &TaskProps{
-		Timer: timer,
-		Start: uTime[recData.Start],
-		End:   uTime[recData.End],
+		Timer:   timer,
+		Channel: ch,
+		Start:   uTime[recData.Start],
+		End:     uTime[recData.End],
 	}
 
 	*reply = RecParams{Status: "OK"}
@@ -275,8 +277,11 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 		if s == true {
 			fmt.Println("Task " + params.RecordingUid + " stopped and removed")
 		} else {
-			fmt.Println("Task " + params.RecordingUid + "already stopped or expired")
+			fmt.Println("Task " + params.RecordingUid + " already stopped or expired")
 		}
+
+		// Stop recording
+		m.tasks[params.RecordingUid].Channel <- "stop"
 
 		// Delete a task (timer) from pool
 		delete(m.tasks, params.RecordingUid)
@@ -288,9 +293,12 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 		return err
 	}
 
+	absf := m.cfg.Main.Mediadir + "/" + params.RecordingUid
+
 	// Delete file from fs (if it exists)
-	if _, err := os.Stat(m.cfg.Main.Mediadir + "/" + params.RecordingUid); os.IsExist(err) {
-		if err := os.Remove(m.cfg.Main.Mediadir + "/" + params.RecordingUid); err != nil {
+	if _, err := os.Stat(absf); err == nil {
+		fmt.Println("deleting ", absf)
+		if err := os.Remove(absf); err != nil {
 			fmt.Println("DeleteRecording os.Remove error:", err)
 			return err
 		}
@@ -333,26 +341,27 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port string, ch <-chan s
 	pktSock := ipv4.NewPacketConn(localSock)
 
 	if err := pktSock.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		fmt.Println("pktSock.SetControlMessage failed")
+		fmt.Println("pktSock.SetControlMessage failed for", mcast, port)
 		return
 	}
 
 	if err := pktSock.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
-		fmt.Println("Failed to join mcast!")
+		fmt.Println("Failed to join mcast", mcast, port)
 		return
 	}
 
 	// TODO: check if file already exists and mv old (?)
+	// FIXME: check if same recording and file already exists (before this func?)
 	file, err := os.OpenFile(recdir+"/"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("error opening file for appending", err)
+		fmt.Println("error opening file for appending", uid, err)
 	}
 
 	defer file.Close()
 
 	pktSock.SetMulticastInterface(iface)
 
-	fmt.Println("Recording!")
+	fmt.Println("Recording asset:", uid)
 
 REC:
 	for {
@@ -360,7 +369,7 @@ REC:
 		select {
 		case msg := <-ch:
 			if msg == "stop" {
-				fmt.Println("Stop recording!")
+				fmt.Println("Stop recording asset:", uid)
 				break REC
 			}
 		default:
