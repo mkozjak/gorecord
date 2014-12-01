@@ -180,14 +180,81 @@ func (m *Methods) GetRecording(params, reply *RecParams) error {
 	}
 
 	*reply = results
-	// fmt.Println(m.tasks[params.RecordingUid].Start, m.tasks[params.RecordingUid].End)
 	return nil
 }
 
 // ScheduleRecording method schedules a given recording according to provided parameters.
 // This method is rpc.Register compliant.
 func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
+	// Check if asset with specified uid already exists
+	// TODO: check status (scheduled/done)
+	r, err := m.db.inst.Get([]byte(recData.RecordingUid), nil)
+	if err != nil && err.Error() != "leveldb: not found" {
+		fmt.Println("ScheduleRecording m.db.inst.Get error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+	_, ok := m.tasks[recData.RecordingUid]
+	if ok == true {
+		fmt.Println("Asset already scheduled:", recData.RecordingUid)
+		*reply = RecParams{Status: "OK", Description: "Already scheduled"}
+		return nil
+	}
+	var ri RecParams
+	if err := json.Unmarshal(r, &ri); err != nil {
+		fmt.Println("ScheduleRecording json.Unmarshal error:", err)
+	}
+	if ri.Status == "ready" {
+		fmt.Println("Asset already done:", recData.RecordingUid)
+		*reply = RecParams{Status: "OK", Description: "Already done"}
+		return nil
+	}
+
+	/*
+	has, err := m.db.inst.Has([]byte(recData.RecordingUid), nil)
+	if err != nil {
+		fmt.Println("ScheduleRecording m.db.inst.Get error:", err)
+		*reply = RecParams{Status: "error"}
+		return err
+	}
+
+	_, ok := m.tasks[recData.RecordingUid]
+	if ok == true {
+		fmt.Println("Asset already scheduled:", recData.RecordingUid)
+		*reply = RecParams{Status: "OK", Description: "Already scheduled"}
+		return nil
+	}
+	// ako ima key i u processing stanju je onda idi dalje, inace nista
+	if has == true {
+		fmt.Println("Asset already scheduled:", recData.RecordingUid)
+		*reply = RecParams{Status: "OK", Description: "Already scheduled"}
+		return nil
+	}
+	*/
+
+	/*
+	if err == nil {
+		var ri RecParams
+		if err := json.Unmarshal(r, &ri); err != nil {
+			fmt.Println("ScheduleRecording json.Unmarshal error:", err)
+			// TODO: return error or not?
+		}
+
+		has, err := m.db.inst.Has([]byte(recData.RecordingUid), nil)
+		if err != nil {
+			// TODO: continue or break?
+			fmt.Println("ScheduleRecording m.db.inst.Has error:", err)
+		}
+		if has == true {
+			fmt.Println("Asset already scheduled:", recData.RecordingUid)
+			*reply = RecParams{Status: "OK", Description: "Already scheduled"}
+			return nil
+		}
+	}
+	*/
+
 	recData.Type = "recording"
+	recData.Status = "processing"
 	j, err := json.Marshal(recData)
 	if err != nil {
 		fmt.Println("ScheduleRecording json.Marshal error:", err)
@@ -250,10 +317,8 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
-			if error := m.db.inst.Delete([]byte(recData.RecordingUid), nil); error != nil {
-				fmt.Println("time.AfterFunc m.db.inst.Delete error:", err)
-				return
-			}
+			recData.Status = "ready"
+			delete(m.tasks, recData.RecordingUid)
 		})
 	})
 
@@ -271,6 +336,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 // DeleteRecording method deletes a recording according to provided parameters.
 // This method is rpc.Register compliant.
 func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error {
+	// FIXME: check if task exists
 	// Stop and delete a scheduled task (timer)
 	if _, ok := m.tasks[params.RecordingUid]; ok {
 		s := m.tasks[params.RecordingUid].Timer.Stop()
@@ -297,7 +363,7 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
-		fmt.Println("deleting ", absf)
+		fmt.Println("Deleting asset:", absf)
 		if err := os.Remove(absf); err != nil {
 			fmt.Println("DeleteRecording os.Remove error:", err)
 			return err
