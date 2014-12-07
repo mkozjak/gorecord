@@ -1,4 +1,5 @@
 package main
+// Migrate from json.Unmarshal/json.Marshal to json.Encode/json.Decode
 
 import (
 	"code.google.com/p/gcfg"
@@ -129,7 +130,6 @@ func (m *Methods) Init(cfg *Config) error {
 // AddChannel method is used to add new channels to persistent store.
 // This method is rpc.Register compliant.
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
-	params.Type = "channel"
 	j, err := json.Marshal(params)
 	if err != nil {
 		fmt.Println("AddChannel json.Marshal error:", err)
@@ -274,7 +274,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
-		go Recorder(m.iface, m.cfg.Main.Mediadir, recUid, chdata.Address, chdata.Port, ch)
+		go Recorder(m.iface, m.cfg.Main.Mediadir, recUid, chdata.Address, chdata.Port, chdata.Type, ch)
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
@@ -377,7 +377,7 @@ func UnixTime(format string, atimes []string) (map[string]int64, error) {
 }
 
 // Recorder function uses the provided network interface and url to record content.
-func Recorder(iface *net.Interface, recdir, uid, mcast, port string, ch <-chan string) {
+func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <-chan string) {
 	ip := net.ParseIP(mcast)
 	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
 
@@ -440,8 +440,10 @@ REC:
 			pkt = newPkt
 		}
 
-		// Slice off udp header
-		pkt = pkt[12:]
+		// If stream is via RTP, slice off rtp header
+		if stype == "rtp" {
+			pkt = pkt[12:]
+		}
 
 		// Store file
 		if cmsg.Dst.IsMulticast() {
