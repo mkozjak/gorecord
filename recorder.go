@@ -1,5 +1,6 @@
 package main
-// Migrate from json.Unmarshal/json.Marshal to json.Encode/json.Decode
+
+// TODO: detect if udp/rtp: mod 188 (pkt size) = udp; mod 12 or more = rtp
 
 import (
 	"code.google.com/p/gcfg"
@@ -160,6 +161,41 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 	return nil
 }
 
+// DeleteChannel method is used to delete a channel from persistent store.
+// It also stops all running/scheduled tasks associated with that channel!
+// This method is rpc.Register compliant.
+func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
+	// Find and stop tasks on that channel
+	for recUid := range m.tasks {
+		if m.tasks[recUid].ChannelUid != params.ChannelUid {
+			continue
+		}
+
+		s := m.tasks[recUid].Timer.Stop()
+		if s == true {
+			fmt.Println("Task " + recUid + " stopped and removed")
+		} else {
+			fmt.Println("Task " + recUid + " already stopped or expired")
+		}
+
+		// Stop an associated recording
+		if time.Now().Unix() > m.tasks[recUid].Start && time.Now().Unix() < m.tasks[recUid].End {
+			m.tasks[recUid].Channel <- "stop"
+		}
+
+		// Delete an associated recording task (timer) from pool
+		delete(m.tasks, recUid)
+
+		// Delete an associated asset from db
+		if err := m.db.inst.Delete([]byte(recUid), nil); err != nil {
+			fmt.Println("DeleteRecording m.db.inst.Delete error:", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
 // GetRecording method returns all recording parameters for a given id.
 // This method is rpc.Register compliant.
 func (m *Methods) GetRecording(params, reply *RecParams) error {
@@ -305,10 +341,11 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	})
 
 	m.tasks[recData.RecordingUid] = &TaskProps{
-		Timer:   timer,
-		Channel: ch,
-		Start:   uTime[recData.Start],
-		End:     uTime[recData.End],
+		Timer:      timer,
+		Channel:    ch,
+		Start:      uTime[recData.Start],
+		End:        uTime[recData.End],
+		ChannelUid: recData.ChannelUid,
 	}
 
 	*reply = RecParams{Status: "OK"}
@@ -342,6 +379,7 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 		fmt.Println("DeleteRecording m.db.inst.Delete error:", err)
 		return err
 	}
+	fmt.Println("Asset " + params.RecordingUid + " removed")
 
 	absf := m.cfg.Main.Mediadir + "/" + params.RecordingUid
 
