@@ -161,6 +161,59 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 	return nil
 }
 
+// ModifyChannel method is used to modify channel properties
+// This method is rpc.Register compliant.
+func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
+	data, err := m.db.inst.Get([]byte(params.ChannelUid), nil)
+	if err != nil && err.Error() == "leveldb: not found" {
+		*reply = GenericReply{Status: "OK", Description: "Not found"}
+		return nil
+	} else if err != nil {
+		fmt.Println("GetRecording m.db.inst.Get error:", err)
+		*reply = GenericReply{Status: "error"}
+		return err
+	}
+
+	var channel ChParams
+	if err := json.Unmarshal(data, &channel); err != nil {
+		fmt.Println("GetRecording json.Unmarshal error:", err)
+		return err
+	}
+
+	// Copy old values if new ones are not provided
+	// goleveldb doesn't support modifying
+	// FIXME: is there a smarter way?
+	if params.Type != "" {
+		channel.Type = params.Type
+	}
+	if params.Address != "" {
+		channel.Address = params.Address
+	}
+	if params.Port != "" {
+		channel.Port = params.Port
+	}
+	if params.Client != "" {
+		channel.Client = params.Client
+	}
+
+	j, err := json.Marshal(channel)
+	if err != nil {
+		fmt.Println("AddChannel json.Marshal error:", err)
+		*reply = GenericReply{Status: "error"}
+		return err
+	}
+
+	fmt.Println("Modifying channel:", params.ChannelUid)
+	if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
+		fmt.Println("AddChannel json.Marshal error:", err)
+		*reply = GenericReply{Status: "error"}
+		return err
+	}
+
+	*reply = GenericReply{Status: "OK"}
+	return nil
+}
+
 // DeleteChannel method is used to delete a channel from persistent store.
 // It also stops all running/scheduled tasks associated with that channel!
 // This method is rpc.Register compliant.
