@@ -107,6 +107,7 @@ func (m *Methods) Init(cfg *Config) error {
 	m.tasks = make(map[string]*TaskProps)
 
 	// Reschedule unfinished tasks
+	fmt.Println("Rescheduling pending tasks...")
 	iter := m.db.inst.NewIterator(nil, nil)
 	for iter.Next() {
 		value := iter.Value()
@@ -128,32 +129,38 @@ func (m *Methods) Init(cfg *Config) error {
 	return nil
 }
 
+// GetInterface method returns the name of the recording interface.
+// This method is rpc.Register compliant.
+func (m *Methods) GetInterface(params, reply *GenericReply) error {
+	*reply = GenericReply{Status: "OK", Description: m.iface.Name}
+	return nil
+}
+
 // AddChannel method is used to add new channels to persistent store.
 // This method is rpc.Register compliant.
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 	j, err := json.Marshal(params)
 	if err != nil {
 		fmt.Println("AddChannel json.Marshal error:", err)
-		*reply = GenericReply{Status: "error"}
+		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	has, err := m.db.inst.Has([]byte(params.ChannelUid), nil)
 	if err != nil {
-		// TODO: continue or break?
 		fmt.Println("AddChannel m.db.inst.Has error:", err)
-		*reply = GenericReply{Status: "error"}
+		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 	if has == false {
 		fmt.Println("Adding new channel:", params.ChannelUid)
 		if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
 			fmt.Println("AddChannel json.Marshal error:", err)
-			*reply = GenericReply{Status: "error"}
+			*reply = GenericReply{Status: "error", Description: err.Error()}
 			return err
 		}
 	} else {
-		*reply = GenericReply{Status: "OK", Description: "Already exists"}
+		*reply = GenericReply{Status: "OK", Description: "Channel already exists"}
 		return nil
 	}
 
@@ -166,11 +173,11 @@ func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 	data, err := m.db.inst.Get([]byte(params.ChannelUid), nil)
 	if err != nil && err.Error() == "leveldb: not found" {
-		*reply = GenericReply{Status: "OK", Description: "Not found"}
+		*reply = GenericReply{Status: "OK", Description: "Channel not found"}
 		return nil
 	} else if err != nil {
 		fmt.Println("GetRecording m.db.inst.Get error:", err)
-		*reply = GenericReply{Status: "error"}
+		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -199,14 +206,14 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 	j, err := json.Marshal(channel)
 	if err != nil {
 		fmt.Println("AddChannel json.Marshal error:", err)
-		*reply = GenericReply{Status: "error"}
+		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	fmt.Println("Modifying channel:", params.ChannelUid)
 	if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
 		fmt.Println("AddChannel json.Marshal error:", err)
-		*reply = GenericReply{Status: "error"}
+		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -218,6 +225,14 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 // It also stops all running/scheduled tasks associated with that channel!
 // This method is rpc.Register compliant.
 func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
+	/*
+		data, err := m.db.inst.Get([]byte(params.ChannelUid), nil)
+		if err != nil && err.Error() == "leveldb: not found" {
+			*reply = GenericReply{Status: "OK", Description: "Channel not found"}
+			return nil
+		}
+	*/
+
 	// Find and stop tasks on that channel
 	for recUid := range m.tasks {
 		if m.tasks[recUid].ChannelUid != params.ChannelUid {
@@ -241,11 +256,21 @@ func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
 
 		// Delete an associated asset from db
 		if err := m.db.inst.Delete([]byte(recUid), nil); err != nil {
-			fmt.Println("DeleteRecording m.db.inst.Delete error:", err)
+			fmt.Println("DeleteChannel asset del m.db.inst.Delete error:", err)
+			*reply = GenericReply{Status: "error", Description: err.Error()}
 			return err
 		}
 	}
 
+	// Finally, delete a channel
+	fmt.Println("Deleting channel:", params.ChannelUid)
+	if err := m.db.inst.Delete([]byte(params.ChannelUid), nil); err != nil {
+		fmt.Println("DeleteChannel m.db.inst.Delete error:", err)
+		*reply = GenericReply{Status: "error", Description: err.Error()}
+		return err
+	}
+
+	*reply = GenericReply{Status: "OK"}
 	return nil
 }
 
@@ -258,7 +283,7 @@ func (m *Methods) GetRecording(params, reply *RecParams) error {
 		return nil
 	} else if err != nil {
 		fmt.Println("GetRecording m.db.inst.Get error:", err)
-		*reply = RecParams{Status: "error"}
+		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -279,7 +304,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	r, err := m.db.inst.Get([]byte(recData.RecordingUid), nil)
 	if err != nil && err.Error() != "leveldb: not found" {
 		fmt.Println("ScheduleRecording m.db.inst.Get error:", err)
-		*reply = RecParams{Status: "error"}
+		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 	if _, ok := m.tasks[recData.RecordingUid]; ok {
@@ -288,7 +313,8 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		return nil
 	}
 	var ri RecParams
-	if err := json.Unmarshal(r, &ri); err != nil {
+	err = json.Unmarshal(r, &ri)
+	if err != nil && err.Error() != "unexpected end of JSON input" {
 		fmt.Println("ScheduleRecording json.Unmarshal error:", err)
 	}
 	if ri.Status == "ready" {
@@ -302,13 +328,13 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	j, err := json.Marshal(recData)
 	if err != nil {
 		fmt.Println("ScheduleRecording json.Marshal error:", err)
-		*reply = RecParams{Status: "error"}
+		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	if err := m.db.inst.Put([]byte(recData.RecordingUid), j, nil); err != nil {
 		fmt.Println("m.db.inst.Put error:", err)
-		*reply = RecParams{Status: "error"}
+		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -316,7 +342,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	uTime, err := UnixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
 	if err != nil {
 		fmt.Println("UnixTime error:", err)
-		*reply = RecParams{Status: "error"}
+		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -358,7 +384,6 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		var chdata ChParams
 		if err := json.Unmarshal(data, &chdata); err != nil {
 			fmt.Println("time.AfterFunc json.Unmarshal error:", err)
-			// FIXME: need to return err to ScheduleRecording!
 			return
 		}
 
@@ -380,12 +405,10 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 			j, err := json.Marshal(uparams)
 			if err != nil {
 				fmt.Println("ScheduleRecording json.Marshal error:", err)
-				// FIXME: need to return err to ScheduleRecording!
 				return
 			}
 			if err := m.db.inst.Put([]byte(recUid), j, nil); err != nil {
 				fmt.Println("m.db.inst.Put error:", err)
-				// FIXME: need to return err to ScheduleRecording!
 				return
 			}
 
@@ -399,6 +422,26 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		Start:      uTime[recData.Start],
 		End:        uTime[recData.End],
 		ChannelUid: recData.ChannelUid,
+	}
+
+	if reply != nil {
+		*reply = RecParams{Status: "OK"}
+	}
+	return nil
+}
+
+// ModifyRecording method reschedules a recording according to provided parameters.
+// This method is rpc.Register compliant.
+func (m *Methods) ModifyRecording(recData, reply *RecParams) error {
+	if err := m.DeleteRecording(recData, nil); err != nil {
+		fmt.Println("ModifyRecording: Error deleting schedule:", err)
+		*reply = RecParams{Status: "error", Description: err.Error()}
+		return err
+	}
+	if err := m.ScheduleRecording(recData, nil); err != nil {
+		fmt.Println("ModifyRecording: Error (re)scheduling:", err)
+		*reply = RecParams{Status: "error", Description: err.Error()}
+		return err
 	}
 
 	*reply = RecParams{Status: "OK"}
@@ -445,7 +488,9 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 		}
 	}
 
-	*reply = GenericReply{Status: "OK"}
+	if reply != nil {
+		*reply = GenericReply{Status: "OK"}
+	}
 	return nil
 }
 
@@ -571,7 +616,7 @@ func main() {
 		return
 	}
 	defer sock.Close()
-	fmt.Println("Listening on port " + cfg.Main.Port)
+	fmt.Println("JSONRPC Server listening on port " + cfg.Main.Port)
 
 	rpc.Register(&meth)
 
