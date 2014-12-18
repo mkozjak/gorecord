@@ -225,6 +225,7 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 // It also stops all running/scheduled tasks associated with that channel!
 // This method is rpc.Register compliant.
 func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
+	// TODO: check if channel exists before deleting it
 	/*
 		data, err := m.db.inst.Get([]byte(params.ChannelUid), nil)
 		if err != nil && err.Error() == "leveldb: not found" {
