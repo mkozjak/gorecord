@@ -6,14 +6,31 @@ import (
 	"code.google.com/p/gcfg"
 	"code.google.com/p/go.net/ipv4"
 	"encoding/json"
-	"fmt"
+	"flag"
 	"github.com/syndtr/goleveldb/leveldb"
+	"log"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"os"
 	"time"
 )
+
+// Parse command-line arguments
+var fcfg = flag.String(
+	"c",
+	"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
+	"full path to config file")
+var srv = flag.Bool("l", false, "start server and listen for requests")
+
+func init() {
+	flag.StringVar(
+		fcfg,
+		"config",
+		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
+		"full path to config file")
+	flag.BoolVar(srv, "listen", false, "start server and listen for requests")
+}
 
 // Config represents main configuration parameters.
 type Config struct {
@@ -93,35 +110,35 @@ func (m *Methods) Init(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Database opened")
+	log.Println("Database opened")
 
 	// Get recording interface
 	m.iface, err = net.InterfaceByName(cfg.Main.Interface)
 	if err != nil {
 		return err
 	}
-	fmt.Println("Capture interface configured")
+	log.Println("Capture interface configured")
 	m.cfg = cfg
 
 	// Initiate tasks store
 	m.tasks = make(map[string]*TaskProps)
 
 	// Reschedule unfinished tasks
-	fmt.Println("Rescheduling pending tasks...")
+	log.Println("Rescheduling pending tasks...")
 	iter := m.db.inst.NewIterator(nil, nil)
 	for iter.Next() {
 		value := iter.Value()
 		params := RecParams{}
 
 		if err := json.Unmarshal(value, &params); err != nil {
-			fmt.Println("Init iter.Next json.Unmarshal error:", err)
+			log.Println("Init iter.Next json.Unmarshal error:", err)
 			continue
 		}
 		if params.Type != "recording" {
 			continue
 		}
 		if err := m.ScheduleRecording(&params, &params); err != nil {
-			fmt.Println("Error (re)scheduling:", err)
+			log.Println("Error (re)scheduling:", err)
 		}
 	}
 	iter.Release()
@@ -141,21 +158,21 @@ func (m *Methods) GetInterface(params, reply *GenericReply) error {
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
 	j, err := json.Marshal(params)
 	if err != nil {
-		fmt.Println("AddChannel json.Marshal error:", err)
+		log.Println("AddChannel json.Marshal error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	has, err := m.db.inst.Has([]byte(params.ChannelUid), nil)
 	if err != nil {
-		fmt.Println("AddChannel m.db.inst.Has error:", err)
+		log.Println("AddChannel m.db.inst.Has error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 	if has == false {
-		fmt.Println("Adding new channel:", params.ChannelUid)
+		log.Println("Adding new channel:", params.ChannelUid)
 		if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
-			fmt.Println("AddChannel json.Marshal error:", err)
+			log.Println("AddChannel json.Marshal error:", err)
 			*reply = GenericReply{Status: "error", Description: err.Error()}
 			return err
 		}
@@ -176,14 +193,14 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 		*reply = GenericReply{Status: "OK", Description: "Channel not found"}
 		return nil
 	} else if err != nil {
-		fmt.Println("GetRecording m.db.inst.Get error:", err)
+		log.Println("GetRecording m.db.inst.Get error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	var channel ChParams
 	if err := json.Unmarshal(data, &channel); err != nil {
-		fmt.Println("GetRecording json.Unmarshal error:", err)
+		log.Println("GetRecording json.Unmarshal error:", err)
 		return err
 	}
 
@@ -205,14 +222,14 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 
 	j, err := json.Marshal(channel)
 	if err != nil {
-		fmt.Println("AddChannel json.Marshal error:", err)
+		log.Println("AddChannel json.Marshal error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
-	fmt.Println("Modifying channel:", params.ChannelUid)
+	log.Println("Modifying channel:", params.ChannelUid)
 	if err := m.db.inst.Put([]byte(params.ChannelUid), j, nil); err != nil {
-		fmt.Println("AddChannel json.Marshal error:", err)
+		log.Println("AddChannel json.Marshal error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
@@ -242,9 +259,9 @@ func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
 
 		s := m.tasks[recUid].Timer.Stop()
 		if s == true {
-			fmt.Println("Task " + recUid + " stopped and removed")
+			log.Println("Task " + recUid + " stopped and removed")
 		} else {
-			fmt.Println("Task " + recUid + " already stopped or expired")
+			log.Println("Task " + recUid + " already stopped or expired")
 		}
 
 		// Stop an associated recording
@@ -257,16 +274,16 @@ func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
 
 		// Delete an associated asset from db
 		if err := m.db.inst.Delete([]byte(recUid), nil); err != nil {
-			fmt.Println("DeleteChannel asset del m.db.inst.Delete error:", err)
+			log.Println("DeleteChannel asset del m.db.inst.Delete error:", err)
 			*reply = GenericReply{Status: "error", Description: err.Error()}
 			return err
 		}
 	}
 
 	// Finally, delete a channel
-	fmt.Println("Deleting channel:", params.ChannelUid)
+	log.Println("Deleting channel:", params.ChannelUid)
 	if err := m.db.inst.Delete([]byte(params.ChannelUid), nil); err != nil {
-		fmt.Println("DeleteChannel m.db.inst.Delete error:", err)
+		log.Println("DeleteChannel m.db.inst.Delete error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
@@ -283,14 +300,14 @@ func (m *Methods) GetRecording(params, reply *RecParams) error {
 		*reply = RecParams{Status: "OK", Description: "Not found"}
 		return nil
 	} else if err != nil {
-		fmt.Println("GetRecording m.db.inst.Get error:", err)
+		log.Println("GetRecording m.db.inst.Get error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	var results RecParams
 	if err := json.Unmarshal(data, &results); err != nil {
-		fmt.Println("GetRecording json.Unmarshal error:", err)
+		log.Println("GetRecording json.Unmarshal error:", err)
 		return err
 	}
 
@@ -304,22 +321,22 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	// Check if asset with specified uid already exists
 	r, err := m.db.inst.Get([]byte(recData.RecordingUid), nil)
 	if err != nil && err.Error() != "leveldb: not found" {
-		fmt.Println("ScheduleRecording m.db.inst.Get error:", err)
+		log.Println("ScheduleRecording m.db.inst.Get error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 	if _, ok := m.tasks[recData.RecordingUid]; ok {
-		fmt.Println("Asset already scheduled:", recData.RecordingUid)
+		log.Println("Asset already scheduled:", recData.RecordingUid)
 		*reply = RecParams{Status: "OK", Description: "Already scheduled"}
 		return nil
 	}
 	var ri RecParams
 	err = json.Unmarshal(r, &ri)
 	if err != nil && err.Error() != "unexpected end of JSON input" {
-		fmt.Println("ScheduleRecording json.Unmarshal error:", err)
+		log.Println("ScheduleRecording json.Unmarshal error:", err)
 	}
 	if ri.Status == "ready" {
-		fmt.Println("Asset already done processing:", recData.RecordingUid)
+		log.Println("Asset already done processing:", recData.RecordingUid)
 		*reply = RecParams{Status: "OK", Description: "Already processed"}
 		return nil
 	}
@@ -328,13 +345,13 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	recData.Status = "processing"
 	j, err := json.Marshal(recData)
 	if err != nil {
-		fmt.Println("ScheduleRecording json.Marshal error:", err)
+		log.Println("ScheduleRecording json.Marshal error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	if err := m.db.inst.Put([]byte(recData.RecordingUid), j, nil); err != nil {
-		fmt.Println("m.db.inst.Put error:", err)
+		log.Println("m.db.inst.Put error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
@@ -342,7 +359,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	// Get start/end times in unix
 	uTime, err := UnixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
 	if err != nil {
-		fmt.Println("UnixTime error:", err)
+		log.Println("UnixTime error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
@@ -374,17 +391,17 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	ch := make(chan string)
 
 	// Start timer which will trigger the recording goroutine
-	fmt.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
+	log.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
-			fmt.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ":" + err.Error())
+			log.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ":" + err.Error())
 			return
 		}
 
 		var chdata ChParams
 		if err := json.Unmarshal(data, &chdata); err != nil {
-			fmt.Println("time.AfterFunc json.Unmarshal error:", err)
+			log.Println("time.AfterFunc json.Unmarshal error:", err)
 			return
 		}
 
@@ -405,11 +422,11 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 			}
 			j, err := json.Marshal(uparams)
 			if err != nil {
-				fmt.Println("ScheduleRecording json.Marshal error:", err)
+				log.Println("ScheduleRecording json.Marshal error:", err)
 				return
 			}
 			if err := m.db.inst.Put([]byte(recUid), j, nil); err != nil {
-				fmt.Println("m.db.inst.Put error:", err)
+				log.Println("m.db.inst.Put error:", err)
 				return
 			}
 
@@ -435,12 +452,12 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 // This method is rpc.Register compliant.
 func (m *Methods) ModifyRecording(recData, reply *RecParams) error {
 	if err := m.DeleteRecording(recData, nil); err != nil {
-		fmt.Println("ModifyRecording: Error deleting schedule:", err)
+		log.Println("ModifyRecording: Error deleting schedule:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
 	if err := m.ScheduleRecording(recData, nil); err != nil {
-		fmt.Println("ModifyRecording: Error (re)scheduling:", err)
+		log.Println("ModifyRecording: Error (re)scheduling:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
 		return err
 	}
@@ -456,9 +473,9 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 	if _, ok := m.tasks[params.RecordingUid]; ok {
 		s := m.tasks[params.RecordingUid].Timer.Stop()
 		if s == true {
-			fmt.Println("Task " + params.RecordingUid + " stopped and removed")
+			log.Println("Task " + params.RecordingUid + " stopped and removed")
 		} else {
-			fmt.Println("Task " + params.RecordingUid + " already stopped or expired")
+			log.Println("Task " + params.RecordingUid + " already stopped or expired")
 		}
 
 		// Stop recording
@@ -473,18 +490,18 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 
 	// Delete asset from db
 	if err := m.db.inst.Delete([]byte(params.RecordingUid), nil); err != nil {
-		fmt.Println("DeleteRecording m.db.inst.Delete error:", err)
+		log.Println("DeleteRecording m.db.inst.Delete error:", err)
 		return err
 	}
-	fmt.Println("Asset " + params.RecordingUid + " removed")
+	log.Println("Asset " + params.RecordingUid + " removed")
 
 	absf := m.cfg.Main.Mediadir + "/" + params.RecordingUid
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
-		fmt.Println("Deleting asset:", absf)
+		log.Println("Deleting asset:", absf)
 		if err := os.Remove(absf); err != nil {
-			fmt.Println("DeleteRecording os.Remove error:", err)
+			log.Println("DeleteRecording os.Remove error:", err)
 			return err
 		}
 	}
@@ -503,7 +520,7 @@ func UnixTime(format string, atimes []string) (map[string]int64, error) {
 	for i, elem := range atimes {
 		t, err := time.Parse(format, elem)
 		if err != nil {
-			fmt.Println("time.Parse error:", err)
+			log.Println("time.Parse error:", err)
 			return nil, err
 		}
 
@@ -520,7 +537,7 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <
 
 	localSock, err := net.ListenPacket("udp4", mcast+":"+port)
 	if err != nil {
-		fmt.Println("net.ListenPacket failed")
+		log.Println("net.ListenPacket failed")
 		return
 	}
 
@@ -528,12 +545,12 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <
 	pktSock := ipv4.NewPacketConn(localSock)
 
 	if err := pktSock.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		fmt.Println("pktSock.SetControlMessage failed for", mcast, port)
+		log.Println("pktSock.SetControlMessage failed for", mcast, port)
 		return
 	}
 
 	if err := pktSock.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
-		fmt.Println("Failed to join mcast", mcast, port)
+		log.Println("Failed to join mcast", mcast, port)
 		return
 	}
 
@@ -541,14 +558,14 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <
 	// FIXME: check if same recording and file already exists (before this func?)
 	file, err := os.OpenFile(recdir+"/"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("error opening file for appending", uid, err)
+		log.Println("error opening file for appending", uid, err)
 	}
 
 	defer file.Close()
 
 	pktSock.SetMulticastInterface(iface)
 
-	fmt.Println("Recording asset:", uid)
+	log.Println("Recording asset:", uid)
 
 REC:
 	for {
@@ -556,7 +573,7 @@ REC:
 		select {
 		case msg := <-ch:
 			if msg == "stop" {
-				fmt.Println("Stop recording asset:", uid)
+				log.Println("Stop recording asset:", uid)
 				break REC
 			}
 		default:
@@ -566,7 +583,7 @@ REC:
 		pkt := make([]byte, 1500)
 		n, cmsg, _, err := pktSock.ReadFrom(pkt)
 		if err != nil {
-			fmt.Println("pktSock.ReadFrom failed")
+			log.Println("pktSock.ReadFrom failed")
 			return
 		}
 
@@ -587,7 +604,7 @@ REC:
 			if cmsg.Dst.Equal(group) {
 				_, err := file.Write(pkt)
 				if err != nil {
-					fmt.Println("error writing to file")
+					log.Println("error writing to file")
 					return
 				}
 			} else {
@@ -598,36 +615,44 @@ REC:
 }
 
 func main() {
+	flag.Parse()
 	var cfg Config
-	if err := gcfg.ReadFileInto(&cfg, "./conf.gcfg"); err != nil {
-		fmt.Println("Error reading config file:", err)
-		os.Exit(1)
+
+	// if _, err := os.Stat(fcfg); err == nil {
+	err := gcfg.ReadFileInto(&cfg, *fcfg)
+	if err != nil && *srv == true {
+		log.Fatalln("Error reading config file:", err)
 	}
 
+	// CLI client
+	if *srv == false {
+		os.Exit(0)
+	}
+
+	// Server
 	meth := Methods{}
 	if err := meth.Init(&cfg); err != nil {
-		fmt.Println("meth.Init() error:", err)
-		os.Exit(1)
+		log.Fatalln("meth.Init() error:", err)
 	}
 	defer meth.db.inst.Close()
 
 	sock, err := net.Listen("tcp", ":"+cfg.Main.Port)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	defer sock.Close()
-	fmt.Println("JSONRPC Server listening on port " + cfg.Main.Port)
+	log.Println("JSONRPC Server listening on port " + cfg.Main.Port)
 
 	rpc.Register(&meth)
 
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			return
 		}
-		fmt.Println("New client connection from", conn.RemoteAddr().String())
+		log.Println("New client connection from", conn.RemoteAddr().String())
 
 		go jsonrpc.ServeConn(conn)
 	}
