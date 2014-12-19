@@ -1,12 +1,11 @@
 package main
 
-// TODO: detect if udp/rtp: mod 188 (pkt size) = udp; mod 12 or more = rtp
-
 import (
 	"code.google.com/p/gcfg"
 	"code.google.com/p/go.net/ipv4"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/syndtr/goleveldb/leveldb"
 	"log"
 	"net"
@@ -16,12 +15,18 @@ import (
 	"time"
 )
 
-// Parse command-line arguments
-var fcfg = flag.String(
-	"c",
-	"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
-	"full path to config file")
-var srv = flag.Bool("l", false, "start server and listen for requests")
+// Command-line interface flags definition
+var (
+	fcfg = flag.String(
+		"c",
+		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
+		"full path to config file")
+	srv   = flag.Bool("l", false, "start server and listen for requests")
+	port  = flag.String("p", "", "network port the jsonrpc server will listen on")
+	iface = flag.String("i", "", "network interface used for capturing the stream media")
+	loc   = flag.String("g", "", "server geolocation")
+	mdir  = flag.String("m", "", "recorded media filesystem location")
+)
 
 func init() {
 	flag.StringVar(
@@ -30,6 +35,10 @@ func init() {
 		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
 		"full path to config file")
 	flag.BoolVar(srv, "listen", false, "start server and listen for requests")
+	flag.StringVar(port, "port", "", "network port the jsonrpc server will listen on")
+	flag.StringVar(iface, "interface", "", "network interface used for capturing the stream media")
+	flag.StringVar(loc, "geolocation", "", "server geolocation")
+	flag.StringVar(mdir, "mediadir", "", "recorded media filesystem location")
 }
 
 // Config represents main configuration parameters.
@@ -117,7 +126,7 @@ func (m *Methods) Init(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	log.Println("Capture interface configured")
+	log.Println("Capture interface set to", cfg.Main.Interface)
 	m.cfg = cfg
 
 	// Initiate tasks store
@@ -614,22 +623,53 @@ REC:
 	}
 }
 
+func setConfDefaults(cfg *Config) {
+	if *port != "" {
+		cfg.Main.Port = *port
+	} else if *port == "" && cfg.Main.Port == "" {
+		cfg.Main.Port = "50280"
+	}
+	if *iface != "" {
+		cfg.Main.Interface = *iface
+	} else if *iface == "" && cfg.Main.Interface == "" {
+		cfg.Main.Interface = "eth0"
+	}
+	if *loc != "" {
+		cfg.Main.Location = *loc
+	} else if *loc == "" && cfg.Main.Location == "" {
+		cfg.Main.Location = "Europe/Zagreb"
+	}
+	if *mdir != "" {
+		cfg.Main.Mediadir = *mdir
+	} else if *mdir == "" && cfg.Main.Mediadir == "" {
+		cfg.Main.Mediadir = "/media"
+	}
+}
+
 func main() {
 	flag.Parse()
 	var cfg Config
 
-	// if _, err := os.Stat(fcfg); err == nil {
-	err := gcfg.ReadFileInto(&cfg, *fcfg)
-	if err != nil && *srv == true {
-		log.Fatalln("Error reading config file:", err)
+	if flag.NFlag() < 1 {
+		fmt.Println("gorecord 0.0.2\n\nUsage:")
+		flag.PrintDefaults()
+		os.Exit(0)
 	}
 
-	// CLI client
+	// TODO: Command-line interface client
 	if *srv == false {
 		os.Exit(0)
 	}
 
 	// Server
+	err := gcfg.ReadFileInto(&cfg, *fcfg)
+	if err != nil && *srv == true {
+		log.Fatalln("Error reading config file:", err)
+	}
+
+	// We cannot set defaults via `flag` because we have to check for gcfg first
+	setConfDefaults(&cfg)
+
 	meth := Methods{}
 	if err := meth.Init(&cfg); err != nil {
 		log.Fatalln("meth.Init() error:", err)
