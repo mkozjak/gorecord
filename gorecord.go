@@ -623,7 +623,7 @@ REC:
 	}
 }
 
-func setConfDefaults(cfg *Config) {
+func setConfig(cfg *Config) {
 	if *port != "" {
 		cfg.Main.Port = *port
 	} else if *port == "" && cfg.Main.Port == "" {
@@ -668,7 +668,7 @@ func main() {
 	}
 
 	// We cannot set defaults via `flag` because we have to check for gcfg first
-	setConfDefaults(&cfg)
+	setConfig(&cfg)
 
 	meth := Methods{}
 	if err := meth.Init(&cfg); err != nil {
