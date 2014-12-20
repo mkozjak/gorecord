@@ -24,7 +24,6 @@ var (
 	srv   = flag.Bool("l", false, "start server and listen for requests")
 	port  = flag.String("p", "", "network port the jsonrpc server will listen on")
 	iface = flag.String("i", "", "network interface used for capturing the stream media")
-	loc   = flag.String("g", "", "server geolocation")
 	mdir  = flag.String("m", "", "recorded media filesystem location")
 )
 
@@ -37,7 +36,6 @@ func init() {
 	flag.BoolVar(srv, "listen", false, "start server and listen for requests")
 	flag.StringVar(port, "port", "", "network port the jsonrpc server will listen on")
 	flag.StringVar(iface, "interface", "", "network interface used for capturing the stream media")
-	flag.StringVar(loc, "geolocation", "", "server geolocation")
 	flag.StringVar(mdir, "mediadir", "", "recorded media filesystem location")
 }
 
@@ -46,7 +44,6 @@ type Config struct {
 	Main struct {
 		Interface  string
 		Port       string
-		Location   string
 		Timelayout string
 		Mediadir   string
 	}
@@ -101,7 +98,6 @@ type TaskProps struct {
 // Methods represents a collection of methods used by jsonrpc.
 type Methods struct {
 	db    *Database
-	loc   *time.Location
 	cfg   *Config
 	iface *net.Interface
 	tasks map[string]*TaskProps
@@ -633,11 +629,6 @@ func setConfig(cfg *Config) {
 		cfg.Main.Interface = *iface
 	} else if *iface == "" && cfg.Main.Interface == "" {
 		cfg.Main.Interface = "eth0"
-	}
-	if *loc != "" {
-		cfg.Main.Location = *loc
-	} else if *loc == "" && cfg.Main.Location == "" {
-		cfg.Main.Location = "Europe/Zagreb"
 	}
 	if *mdir != "" {
 		cfg.Main.Mediadir = *mdir

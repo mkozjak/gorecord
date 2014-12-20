@@ -14,13 +14,11 @@ Create/Edit configuration in the current git location (will be fixed with cli, e
     [main]
     interface = eth0
     port = 2000
-    location = Europe/Zagreb
     timelayout = 2006-01-02T15:04:05-0700
     mediadir = /home/mkozjak/tmp
 
 * interface: Recording interface used (linux/bsd: ifconfig)
 * port: Listening port for JSONRPC server
-* location: Geolocation of your server/desktop
 * timelayout: Datetime layout provided in a request to the JSONRPC server
 * mediadir: Directory where streaming media will be stored (recorded)
 
@@ -50,7 +48,6 @@ TODO
 * create cli interface (so users can schedule/start recordings via cli or jsonrpc)
 * autodetect multicast stream type (udp/rtp) (mod 188 (pkt size) = udp; mod 12 or more = rtp)
 * add unicast support
-* autodetect location
-* set defaults (port, timelayout, location, mediadir)
+* ignore unknown config values
 * complete documentation
 * live capture interface switch
