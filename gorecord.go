@@ -158,6 +158,22 @@ func (m *Methods) GetInterface(params, reply *GenericReply) error {
 	return nil
 }
 
+// SetInterface method sets the recording interface to the provided value.
+// This method is rpc.Register compliant.
+func (m *Methods) SetInterface(iface string, reply *GenericReply) error {
+	var err error
+	m.iface, err = net.InterfaceByName(iface)
+	if err != nil {
+		*reply = GenericReply{Status: "error", Description: err.Error()}
+		return err
+	}
+
+	// TODO: set this to config!
+	log.Println("Capture interface set to", m.iface.Name)
+	*reply = GenericReply{Status: "OK"}
+	return nil
+}
+
 // AddChannel method is used to add new channels to persistent store.
 // This method is rpc.Register compliant.
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
