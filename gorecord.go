@@ -1,12 +1,12 @@
 package main
 
 import (
-	"code.google.com/p/gcfg"
 	"code.google.com/p/go.net/ipv4"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/syndtr/goleveldb/leveldb"
+	"gopkg.in/ini.v0"
 	"log"
 	"net"
 	"net/rpc"
@@ -17,36 +17,26 @@ import (
 
 // Command-line interface flags definition
 var (
-	fcfg = flag.String(
+	cfgFlag = flag.String(
 		"c",
 		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
 		"full path to config file")
-	srv   = flag.Bool("l", false, "start server and listen for requests")
-	port  = flag.String("p", "", "network port the jsonrpc server will listen on")
-	iface = flag.String("i", "", "network interface used for capturing the stream media")
-	mdir  = flag.String("m", "", "recorded media filesystem location")
+	srvFlag   = flag.Bool("l", false, "start server and listen for requests")
+	portFlag  = flag.String("p", "", "network port the jsonrpc server will listen on")
+	ifaceFlag = flag.String("i", "", "network interface used for capturing the stream media")
+	mdirFlag  = flag.String("m", "", "recorded media filesystem location")
 )
 
 func init() {
 	flag.StringVar(
-		fcfg,
+		cfgFlag,
 		"config",
 		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
 		"full path to config file")
-	flag.BoolVar(srv, "listen", false, "start server and listen for requests")
-	flag.StringVar(port, "port", "", "network port the jsonrpc server will listen on")
-	flag.StringVar(iface, "interface", "", "network interface used for capturing the stream media")
-	flag.StringVar(mdir, "mediadir", "", "recorded media filesystem location")
-}
-
-// Config represents main configuration parameters.
-type Config struct {
-	Main struct {
-		Interface  string
-		Port       string
-		Timelayout string
-		Mediadir   string
-	}
+	flag.BoolVar(srvFlag, "listen", false, "start server and listen for requests")
+	flag.StringVar(portFlag, "port", "", "network port the jsonrpc server will listen on")
+	flag.StringVar(ifaceFlag, "interface", "", "network interface used for capturing the stream media")
+	flag.StringVar(mdirFlag, "mediadir", "", "recorded media filesystem location")
 }
 
 // Database represents a database instance storage.
@@ -98,7 +88,7 @@ type TaskProps struct {
 // Methods represents a collection of methods used by jsonrpc.
 type Methods struct {
 	db    *Database
-	cfg   *Config
+	cfg   map[string]string
 	iface *net.Interface
 	tasks map[string]*TaskProps
 }
@@ -106,7 +96,7 @@ type Methods struct {
 // Init initiates a persistent key/value store, sets a recording interface
 // and declares a tasks map to store scheduled jobs.
 // It returns an error if any init operation fails.
-func (m *Methods) Init(cfg *Config) error {
+func (m *Methods) Init(cfg map[string]string) error {
 	var err error
 
 	// Connect to persistent key/value store
@@ -118,11 +108,11 @@ func (m *Methods) Init(cfg *Config) error {
 	log.Println("Database opened")
 
 	// Get recording interface
-	m.iface, err = net.InterfaceByName(cfg.Main.Interface)
+	m.iface, err = net.InterfaceByName(cfg["interface"])
 	if err != nil {
 		return err
 	}
-	log.Println("Capture interface set to", cfg.Main.Interface)
+	log.Println("Capture interface set to", cfg["interface"])
 	m.cfg = cfg
 
 	// Initiate tasks store
@@ -378,7 +368,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	// Get start/end times in unix
-	uTime, err := UnixTime(m.cfg.Main.Timelayout, []string{recData.Start, recData.End})
+	uTime, err := UnixTime(m.cfg["timelayout"], []string{recData.Start, recData.End})
 	if err != nil {
 		log.Println("UnixTime error:", err)
 		*reply = RecParams{Status: "error", Description: err.Error()}
@@ -427,7 +417,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
-		go Recorder(m.iface, m.cfg.Main.Mediadir, recUid, chdata.Address, chdata.Port, chdata.Type, ch)
+		go Recorder(m.iface, m.cfg["mediadir"], recUid, chdata.Address, chdata.Port, chdata.Type, ch)
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
@@ -516,7 +506,7 @@ func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error 
 	}
 	log.Println("Asset " + params.RecordingUid + " removed")
 
-	absf := m.cfg.Main.Mediadir + "/" + params.RecordingUid
+	absf := m.cfg["mediadir"] + "/" + params.RecordingUid
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
@@ -635,27 +625,32 @@ REC:
 	}
 }
 
-func setConfig(cfg *Config) {
-	if *port != "" {
-		cfg.Main.Port = *port
-	} else if *port == "" && cfg.Main.Port == "" {
-		cfg.Main.Port = "50280"
+func setConfig(cfg map[string]string, file *ini.File) {
+	if *portFlag != "" {
+		cfg["port"] = *portFlag
+	} else if *portFlag == "" && cfg["port"] == "" {
+		cfg["port"] = "50280"
 	}
-	if *iface != "" {
-		cfg.Main.Interface = *iface
-	} else if *iface == "" && cfg.Main.Interface == "" {
-		cfg.Main.Interface = "eth0"
+	if *ifaceFlag != "" {
+		cfg["interface"] = *ifaceFlag
+	} else if *ifaceFlag == "" && cfg["interface"] == "" {
+		cfg["interface"] = "eth0"
 	}
-	if *mdir != "" {
-		cfg.Main.Mediadir = *mdir
-	} else if *mdir == "" && cfg.Main.Mediadir == "" {
-		cfg.Main.Mediadir = "/media"
+	if *mdirFlag != "" {
+		cfg["mediadir"] = *mdirFlag
+	} else if *mdirFlag == "" && cfg["mediadir"] == "" {
+		cfg["mediadir"] = "/media"
 	}
+
+	/* placeholder
+	if err := file.SaveTo(*cfgFlag); err != nil {
+		log.Println(err)
+	}
+	*/
 }
 
 func main() {
 	flag.Parse()
-	var cfg Config
 
 	if flag.NFlag() < 1 {
 		fmt.Println("gorecord 0.0.2\n\nUsage:")
@@ -664,32 +659,33 @@ func main() {
 	}
 
 	// TODO: Command-line interface client
-	if *srv == false {
+	if *srvFlag == false {
 		os.Exit(0)
 	}
 
 	// Server
-	err := gcfg.ReadFileInto(&cfg, *fcfg)
-	if err != nil && *srv == true {
+	fcfg, err := ini.Load(*cfgFlag)
+	if err != nil && *srvFlag == true {
 		log.Fatalln("Error reading config file:", err)
 	}
+	cfg := fcfg.Section("").KeysHash()
 
 	// We cannot set defaults via `flag` because we have to check for gcfg first
-	setConfig(&cfg)
+	setConfig(cfg, fcfg)
 
 	meth := Methods{}
-	if err := meth.Init(&cfg); err != nil {
+	if err := meth.Init(cfg); err != nil {
 		log.Fatalln("meth.Init() error:", err)
 	}
 	defer meth.db.inst.Close()
 
-	sock, err := net.Listen("tcp", ":"+cfg.Main.Port)
+	sock, err := net.Listen("tcp", ":"+cfg["port"])
 	if err != nil {
 		log.Println(err)
 		return
 	}
 	defer sock.Close()
-	log.Println("JSONRPC Server listening on port " + cfg.Main.Port)
+	log.Println("JSONRPC Server listening on port " + cfg["port"])
 
 	rpc.Register(&meth)
 

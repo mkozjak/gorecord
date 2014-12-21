@@ -1,1 +1,6 @@
 db/
+*.patch
+*.gcfg
+*.cfg
+*.swp
+*.swo
