@@ -48,6 +48,4 @@ TODO
 * create cli interface (so users can schedule/start recordings via cli or jsonrpc)
 * autodetect multicast stream type (udp/rtp) (mod 188 (pkt size) = udp; mod 12 or more = rtp)
 * add unicast support
-* ignore unknown config values
 * complete documentation
-* live capture interface switch
