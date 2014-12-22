@@ -146,6 +146,21 @@ func (m *Methods) Init(cfg *Config) error {
 	return nil
 }
 
+func (m *Methods) EditConfFile(section, name, value string) error {
+	key, err := m.cfg.fh.Section(section).GetKey(name)
+	if err != nil {
+		log.Println("Error getting key:", err)
+		return err
+	}
+	key.SetValue(value)
+
+	if err := m.cfg.fh.SaveTo(*cfgFlag); err != nil {
+		log.Println("Error storing key modifications to file:", err)
+		return err
+	}
+	return nil
+}
+
 // GetInterface method returns the name of the recording interface.
 // This method is rpc.Register compliant.
 func (m *Methods) GetInterface(params, reply *GenericReply) error {
@@ -166,17 +181,8 @@ func (m *Methods) SetInterface(iface string, reply *GenericReply) error {
 	// Set to running configuration
 	m.cfg.opts["Interface"] = m.iface.Name
 	// Set to permanent configuration (file)
-	key, err := m.cfg.fh.Section("").GetKey("interface")
-	if err != nil {
+	if err := m.EditConfFile("", "interface", m.iface.Name); err != nil {
 		*reply = GenericReply{Status: "error", Description: err.Error()}
-		log.Println("Error getting interface key:", err)
-		return err
-	}
-	key.SetValue(m.iface.Name)
-
-	if err := m.cfg.fh.SaveTo(*cfgFlag); err != nil {
-		*reply = GenericReply{Status: "error", Description: err.Error()}
-		log.Println("Error storing new interface to file:", err)
 		return err
 	}
 
@@ -683,7 +689,6 @@ func main() {
 	if err != nil && *srvFlag == true {
 		log.Fatalln("Error reading config file:", err)
 	}
-	// cfg := fh.Section("").KeysHash()
 	cfg := Config{fh.Section("").KeysHash(), fh}
 
 	// We cannot set defaults via `flag` because we have to check for ini first
