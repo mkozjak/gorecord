@@ -39,6 +39,7 @@ func init() {
 	flag.StringVar(mdirFlag, "mediadir", "", "recorded media filesystem location")
 }
 
+// Config represents an application configuration instance.
 type Config struct {
 	opts map[string]string
 	fh   *ini.File
@@ -57,17 +58,17 @@ type GenericReply struct {
 	Error       error  `json:"error,omitempty"`
 }
 
-// RecParams represents recordings parameters.
-type RecParams struct {
-	Status       string `json:"status,omitempty"`
-	Description  string `json:"description,omitempty"`
-	Type         string `json:"type,omitempty"`
-	Client       string `json:"client,omitempty"`
-	RecordingUid string `json:"recording_uid,omitempty"`
-	ChannelUid   string `json:"channel_uid,omitempty"`
-	Start        string `json:"start,omitempty"`
-	End          string `json:"end,omitempty"`
-	Id           int    `json:"id,omitempty"`
+// AssetParams represents recordings parameters.
+type AssetParams struct {
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Client      string `json:"client,omitempty"`
+	AssetUid    string `json:"asset_uid,omitempty"`
+	ChannelUid  string `json:"channel_uid,omitempty"`
+	Start       string `json:"start,omitempty"`
+	End         string `json:"end,omitempty"`
+	Id          int    `json:"id,omitempty"`
 }
 
 // ChParams represents channel parameters.
@@ -124,11 +125,12 @@ func (m *Methods) Init(cfg *Config) error {
 	m.tasks = make(map[string]*TaskProps)
 
 	// Reschedule unfinished tasks
+	// TODO: skip finished tasks
 	log.Println("Rescheduling pending tasks...")
 	iter := m.db.inst.NewIterator(nil, nil)
 	for iter.Next() {
 		value := iter.Value()
-		params := RecParams{}
+		params := AssetParams{}
 
 		if err := json.Unmarshal(value, &params); err != nil {
 			log.Println("Init iter.Next json.Unmarshal error:", err)
@@ -191,6 +193,12 @@ func (m *Methods) SetInterface(iface string, reply *GenericReply) error {
 	return nil
 }
 
+// CheckAsset method returns current asset's state
+// This method is rpc.Register compliant.
+func (m *Methods) CheckAsset() error {
+	return nil
+}
+
 // AddChannel method is used to add new channels to persistent store.
 // This method is rpc.Register compliant.
 func (m *Methods) AddChannel(params *ChParams, reply *GenericReply) error {
@@ -231,14 +239,14 @@ func (m *Methods) ModifyChannel(params *ChParams, reply *GenericReply) error {
 		*reply = GenericReply{Status: "OK", Description: "Channel not found"}
 		return nil
 	} else if err != nil {
-		log.Println("GetRecording m.db.inst.Get error:", err)
+		log.Println("ModifyChannel m.db.inst.Get error:", err)
 		*reply = GenericReply{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	var channel ChParams
 	if err := json.Unmarshal(data, &channel); err != nil {
-		log.Println("GetRecording json.Unmarshal error:", err)
+		log.Println("ModifyChannel json.Unmarshal error:", err)
 		return err
 	}
 
@@ -332,18 +340,18 @@ func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
 
 // GetRecording method returns all recording parameters for a given id.
 // This method is rpc.Register compliant.
-func (m *Methods) GetRecording(params, reply *RecParams) error {
-	data, err := m.db.inst.Get([]byte(params.RecordingUid), nil)
+func (m *Methods) GetRecording(params, reply *AssetParams) error {
+	data, err := m.db.inst.Get([]byte(params.AssetUid), nil)
 	if err != nil && err.Error() == "leveldb: not found" {
-		*reply = RecParams{Status: "OK", Description: "Not found"}
+		*reply = AssetParams{Status: "OK", Description: "Not found"}
 		return nil
 	} else if err != nil {
 		log.Println("GetRecording m.db.inst.Get error:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
-	var results RecParams
+	var results AssetParams
 	if err := json.Unmarshal(data, &results); err != nil {
 		log.Println("GetRecording json.Unmarshal error:", err)
 		return err
@@ -355,27 +363,27 @@ func (m *Methods) GetRecording(params, reply *RecParams) error {
 
 // ScheduleRecording method schedules a given recording according to provided parameters.
 // This method is rpc.Register compliant.
-func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
+func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	// Check if asset with specified uid already exists
-	r, err := m.db.inst.Get([]byte(recData.RecordingUid), nil)
+	r, err := m.db.inst.Get([]byte(recData.AssetUid), nil)
 	if err != nil && err.Error() != "leveldb: not found" {
 		log.Println("ScheduleRecording m.db.inst.Get error:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
-	if _, ok := m.tasks[recData.RecordingUid]; ok {
-		log.Println("Asset already scheduled:", recData.RecordingUid)
-		*reply = RecParams{Status: "OK", Description: "Already scheduled"}
+	if _, ok := m.tasks[recData.AssetUid]; ok {
+		log.Println("Asset already scheduled:", recData.AssetUid)
+		*reply = AssetParams{Status: "OK", Description: "Already scheduled"}
 		return nil
 	}
-	var ri RecParams
+	var ri AssetParams
 	err = json.Unmarshal(r, &ri)
 	if err != nil && err.Error() != "unexpected end of JSON input" {
 		log.Println("ScheduleRecording json.Unmarshal error:", err)
 	}
 	if ri.Status == "ready" {
-		log.Println("Asset already done processing:", recData.RecordingUid)
-		*reply = RecParams{Status: "OK", Description: "Already processed"}
+		log.Println("Asset already done processing:", recData.AssetUid)
+		*reply = AssetParams{Status: "OK", Description: "Already processed"}
 		return nil
 	}
 
@@ -384,13 +392,13 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	j, err := json.Marshal(recData)
 	if err != nil {
 		log.Println("ScheduleRecording json.Marshal error:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
-	if err := m.db.inst.Put([]byte(recData.RecordingUid), j, nil); err != nil {
+	if err := m.db.inst.Put([]byte(recData.AssetUid), j, nil); err != nil {
 		log.Println("m.db.inst.Put error:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
@@ -398,18 +406,18 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	uTime, err := UnixTime(m.cfg.opts["timelayout"], []string{recData.Start, recData.End})
 	if err != nil {
 		log.Println("UnixTime error:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
 	// Get current local time in unix and duration in seconds
 	now := time.Now().Unix()
 	if uTime[recData.End] < now {
-		*reply = RecParams{Status: "OK", Description: "End is in past"}
+		*reply = AssetParams{Status: "OK", Description: "End is in past"}
 		return nil
 	}
 	if uTime[recData.Start] > uTime[recData.End] {
-		*reply = RecParams{Status: "OK", Description: "Start after end"}
+		*reply = AssetParams{Status: "OK", Description: "Start after end"}
 		return nil
 	}
 	if uTime[recData.Start] <= now {
@@ -420,7 +428,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	recType := recData.Type
 	recClient := recData.Client
 	recCh := recData.ChannelUid
-	recUid := recData.RecordingUid
+	recUid := recData.AssetUid
 	recStart := recData.Start
 	recEnd := recData.End
 	recId := recData.Id
@@ -429,7 +437,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	ch := make(chan string)
 
 	// Start timer which will trigger the recording goroutine
-	log.Println("Scheduling asset:", recData.RecordingUid, recData.Start)
+	log.Println("Scheduling asset:", recData.AssetUid, recData.Start)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
@@ -448,15 +456,15 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
-			uparams := RecParams{
-				Status:       "ready",
-				Type:         recType,
-				Client:       recClient,
-				RecordingUid: recUid,
-				ChannelUid:   recCh,
-				Start:        recStart,
-				End:          recEnd,
-				Id:           recId,
+			uparams := AssetParams{
+				Status:     "ready",
+				Type:       recType,
+				Client:     recClient,
+				AssetUid:   recUid,
+				ChannelUid: recCh,
+				Start:      recStart,
+				End:        recEnd,
+				Id:         recId,
 			}
 			j, err := json.Marshal(uparams)
 			if err != nil {
@@ -472,7 +480,7 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 		})
 	})
 
-	m.tasks[recData.RecordingUid] = &TaskProps{
+	m.tasks[recData.AssetUid] = &TaskProps{
 		Timer:      timer,
 		Channel:    ch,
 		Start:      uTime[recData.Start],
@@ -481,59 +489,59 @@ func (m *Methods) ScheduleRecording(recData, reply *RecParams) error {
 	}
 
 	if reply != nil {
-		*reply = RecParams{Status: "OK"}
+		*reply = AssetParams{Status: "OK"}
 	}
 	return nil
 }
 
 // ModifyRecording method reschedules a recording according to provided parameters.
 // This method is rpc.Register compliant.
-func (m *Methods) ModifyRecording(recData, reply *RecParams) error {
+func (m *Methods) ModifyRecording(recData, reply *AssetParams) error {
 	if err := m.DeleteRecording(recData, nil); err != nil {
 		log.Println("ModifyRecording: Error deleting schedule:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 	if err := m.ScheduleRecording(recData, nil); err != nil {
 		log.Println("ModifyRecording: Error (re)scheduling:", err)
-		*reply = RecParams{Status: "error", Description: err.Error()}
+		*reply = AssetParams{Status: "error", Description: err.Error()}
 		return err
 	}
 
-	*reply = RecParams{Status: "OK"}
+	*reply = AssetParams{Status: "OK"}
 	return nil
 }
 
 // DeleteRecording method deletes a recording according to provided parameters.
 // This method is rpc.Register compliant.
-func (m *Methods) DeleteRecording(params *RecParams, reply *GenericReply) error {
+func (m *Methods) DeleteRecording(params *AssetParams, reply *GenericReply) error {
 	// Stop and delete a scheduled task (timer)
-	if _, ok := m.tasks[params.RecordingUid]; ok {
-		s := m.tasks[params.RecordingUid].Timer.Stop()
+	if _, ok := m.tasks[params.AssetUid]; ok {
+		s := m.tasks[params.AssetUid].Timer.Stop()
 		if s == true {
-			log.Println("Task " + params.RecordingUid + " stopped and removed")
+			log.Println("Task " + params.AssetUid + " stopped and removed")
 		} else {
-			log.Println("Task " + params.RecordingUid + " already stopped or expired")
+			log.Println("Task " + params.AssetUid + " already stopped or expired")
 		}
 
 		// Stop recording
 		// TODO: also check by asset Status
-		if time.Now().Unix() > m.tasks[params.RecordingUid].Start && time.Now().Unix() < m.tasks[params.RecordingUid].End {
-			m.tasks[params.RecordingUid].Channel <- "stop"
+		if time.Now().Unix() > m.tasks[params.AssetUid].Start && time.Now().Unix() < m.tasks[params.AssetUid].End {
+			m.tasks[params.AssetUid].Channel <- "stop"
 		}
 
 		// Delete a task (timer) from pool
-		delete(m.tasks, params.RecordingUid)
+		delete(m.tasks, params.AssetUid)
 	}
 
 	// Delete asset from db
-	if err := m.db.inst.Delete([]byte(params.RecordingUid), nil); err != nil {
+	if err := m.db.inst.Delete([]byte(params.AssetUid), nil); err != nil {
 		log.Println("DeleteRecording m.db.inst.Delete error:", err)
 		return err
 	}
-	log.Println("Asset " + params.RecordingUid + " removed")
+	log.Println("Asset " + params.AssetUid + " removed")
 
-	absf := m.cfg.opts["mediadir"] + "/" + params.RecordingUid
+	absf := m.cfg.opts["mediadir"] + "/" + params.AssetUid
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
