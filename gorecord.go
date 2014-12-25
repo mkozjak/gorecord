@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"code.google.com/p/go.net/ipv4"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/syndtr/goleveldb/leveldb"
 	"gopkg.in/ini.v0"
+	"io"
 	"log"
 	"net"
 	"net/rpc"
@@ -195,7 +197,28 @@ func (m *Methods) SetInterface(iface string, reply *GenericReply) error {
 
 // CheckAsset method returns current asset's state
 // This method is rpc.Register compliant.
-func (m *Methods) CheckAsset() error {
+func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
+	data, err := m.db.inst.Get([]byte(params.AssetUid), nil)
+	if err != nil && err.Error() == "leveldb: not found" {
+		*reply = GenericReply{Status: "OK", Description: "Asset not found"}
+		return nil
+	} else if err != nil {
+		log.Println("GetRecording m.db.inst.Get error:", err)
+		*reply = GenericReply{Status: "error", Description: err.Error()}
+		return err
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for {
+		// var dparams AssetParams
+		if err := dec.Decode(&params); err == io.EOF {
+			break
+		} else if err != nil {
+			log.Println("CheckAsset dec.Decode error:", err)
+		}
+	}
+
+	*reply = GenericReply{Status: "OK", Description: params.Status}
 	return nil
 }
 
@@ -388,19 +411,6 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	}
 
 	recData.Type = "recording"
-	recData.Status = "processing"
-	j, err := json.Marshal(recData)
-	if err != nil {
-		log.Println("ScheduleRecording json.Marshal error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
-		return err
-	}
-
-	if err := m.db.inst.Put([]byte(recData.AssetUid), j, nil); err != nil {
-		log.Println("m.db.inst.Put error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
-		return err
-	}
 
 	// Get start/end times in unix
 	uTime, err := UnixTime(m.cfg.opts["timelayout"], []string{recData.Start, recData.End})
@@ -436,6 +446,21 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	// Create a channel that will be used to talk to a goroutine
 	ch := make(chan string)
 
+	// Set state to "scheduled"
+	recData.Status = "scheduled"
+	j, err := json.Marshal(recData)
+	if err != nil {
+		log.Println("ScheduleRecording json.Marshal error:", err)
+		*reply = AssetParams{Status: "error", Description: err.Error()}
+		return err
+	}
+
+	if err := m.db.inst.Put([]byte(recData.AssetUid), j, nil); err != nil {
+		log.Println("m.db.inst.Put error:", err)
+		*reply = AssetParams{Status: "error", Description: err.Error()}
+		return err
+	}
+
 	// Start timer which will trigger the recording goroutine
 	log.Println("Scheduling asset:", recData.AssetUid, recData.Start)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
@@ -452,10 +477,35 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
+		// FIXME: set state to 'processing' here
 		go Recorder(m.iface, m.cfg.opts["mediadir"], recUid, chdata.Address, chdata.Port, chdata.Type, ch)
+
+		// Set state to "processing"
+		uparams := AssetParams{
+			Status:     "processing",
+			Type:       recType,
+			Client:     recClient,
+			AssetUid:   recUid,
+			ChannelUid: recCh,
+			Start:      recStart,
+			End:        recEnd,
+			Id:         recId,
+		}
+		j, err := json.Marshal(uparams)
+		if err != nil {
+			log.Println("ScheduleRecording json.Marshal error:", err)
+			return
+		}
+		if err := m.db.inst.Put([]byte(recUid), j, nil); err != nil {
+			log.Println("m.db.inst.Put error:", err)
+			return
+		}
+
+		// Start timer which will stop the recording goroutine
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
+			// Set state to "ready"
 			uparams := AssetParams{
 				Status:     "ready",
 				Type:       recType,
