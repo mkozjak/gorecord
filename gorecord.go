@@ -131,7 +131,6 @@ func (m *Methods) Init(cfg *Config) error {
 	m.tasks = make(map[string]*TaskProps)
 
 	// Reschedule unfinished tasks
-	// TODO: skip finished tasks
 	log.Println("Rescheduling pending tasks...")
 	iter := m.db.inst.NewIterator(nil, nil)
 	for iter.Next() {
@@ -142,7 +141,7 @@ func (m *Methods) Init(cfg *Config) error {
 			log.Println("Init iter.Next json.Unmarshal error:", err)
 			continue
 		}
-		if params.Type != "recording" {
+		if params.Type != "recording" || params.Status == "ready" {
 			continue
 		}
 		if err := m.ScheduleRecording(&params, &params); err != nil {
