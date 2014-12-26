@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"code.google.com/p/go.net/ipv4"
+	"crypto/md5"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -70,6 +73,7 @@ type AssetParams struct {
 	ChannelUid  string `json:"channel_uid,omitempty"`
 	Start       string `json:"start,omitempty"`
 	End         string `json:"end,omitempty"`
+	Check       string `json:"check,omitempty"`
 	Id          int    `json:"id,omitempty"`
 }
 
@@ -210,12 +214,13 @@ func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
 
 	dec := json.NewDecoder(bytes.NewReader(data))
 	for {
-		// var dparams AssetParams
 		if err := dec.Decode(&params); err == io.EOF {
 			break
 		} else if err != nil {
 			log.Println("CheckAsset dec.Decode error:", err)
 		}
+	}
+	if params.Status == "ready" {
 	}
 
 	*reply = GenericReply{Status: "OK", Description: params.Status}
@@ -505,6 +510,13 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 		time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
+			// Create a simple md5 sum
+			md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + recUid)
+			if err != nil {
+				log.Println("Failed to create md5 for asset", recUid, err)
+				md5 = ""
+			}
+
 			// Set state to "ready"
 			uparams := AssetParams{
 				Status:     "ready",
@@ -514,6 +526,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 				ChannelUid: recCh,
 				Start:      recStart,
 				End:        recEnd,
+				Check:      md5,
 				Id:         recId,
 			}
 			j, err := json.Marshal(uparams)
@@ -708,6 +721,37 @@ REC:
 			}
 		}
 	}
+}
+
+// Function createAssetHash uses a 1K start, end and length of file to create md5.
+func createAssetHash(filename string) (string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		fmt.Println(err)
+	}
+	b := make([]byte, 1024)
+	e := b[:]
+	l := b[:]
+
+	if _, err := f.Read(b); err != nil {
+		fmt.Println("Read:", err)
+		return "", err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		fmt.Println("Stat:", err)
+		return "", err
+	}
+	si := fi.Size()
+	f.ReadAt(e, si-int64(len(e)))
+	binary.PutVarint(l, si)
+
+	out := [][]byte{b, e, l}
+	j := []byte{}
+	j = bytes.Join(out, nil)
+	sum := md5.Sum(j)
+
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func setConfig(cfg *Config) {
