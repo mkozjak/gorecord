@@ -217,9 +217,46 @@ func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
 			break
 		} else if err != nil {
 			log.Println("CheckAsset dec.Decode error:", err)
+			*reply = GenericReply{Status: "error", Description: err.Error()}
+			return err
 		}
 	}
-	if params.Status == "ready" {
+	if params.Status == "ready" || params.Status == "modified" {
+		md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + params.AssetUid)
+		if err != nil {
+			log.Println("Failed to create md5 for asset", params.AssetUid, err)
+			*reply = GenericReply{Status: "error", Description: err.Error()}
+			return err
+		}
+		if params.Check == md5 && params.Status != "ready" {
+			params.Status = "ready"
+		} else if params.Check != md5 && params.Status != "modified" {
+			params.Status = "modified"
+		}
+
+		// Set state to "modified" or "ready"
+		uparams := AssetParams{
+			Status:     params.Status,
+			Type:       params.Type,
+			Client:     params.Client,
+			AssetUid:   params.AssetUid,
+			ChannelUid: params.ChannelUid,
+			Start:      params.Start,
+			End:        params.End,
+			Check:      params.Check,
+			Id:         params.Id,
+		}
+		j, err := json.Marshal(uparams)
+		if err != nil {
+			log.Println("CheckAsset json.Marshal error:", err)
+			*reply = GenericReply{Status: "error", Description: err.Error()}
+			return err
+		}
+		if err := m.db.inst.Put([]byte(params.AssetUid), j, nil); err != nil {
+			log.Println("CheckAsset m.db.inst.Put error:", err)
+			*reply = GenericReply{Status: "error", Description: err.Error()}
+			return err
+		}
 	}
 
 	*reply = GenericReply{Status: "OK", Description: params.Status}
@@ -481,7 +518,6 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
-		// FIXME: set state to 'processing' here
 		go Recorder(m.iface, m.cfg.opts["mediadir"], recUid, chdata.Address, chdata.Port, chdata.Type, ch)
 
 		// Set state to "processing"
@@ -726,19 +762,19 @@ REC:
 func createAssetHash(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 	b := make([]byte, 1024)
 	e := b[:]
 	l := b[:]
 
 	if _, err := f.Read(b); err != nil {
-		fmt.Println("Read:", err)
+		log.Println("Read:", err)
 		return "", err
 	}
 	fi, err := f.Stat()
 	if err != nil {
-		fmt.Println("Stat:", err)
+		log.Println("Stat:", err)
 		return "", err
 	}
 	si := fi.Size()
