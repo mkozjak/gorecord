@@ -144,7 +144,7 @@ func (m *Methods) Init(cfg *Config) error {
 		if params.Type != "recording" || params.Status == "ready" {
 			continue
 		}
-		if err := m.ScheduleRecording(&params, &params); err != nil {
+		if err := m.ScheduleRecording(&params, nil); err != nil {
 			log.Println("Error (re)scheduling:", err)
 		}
 	}
@@ -434,12 +434,16 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	r, err := m.db.inst.Get([]byte(recData.AssetUid), nil)
 	if err != nil && err.Error() != "leveldb: not found" {
 		log.Println("ScheduleRecording m.db.inst.Get error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 	if _, ok := m.tasks[recData.AssetUid]; ok {
 		log.Println("Asset already scheduled:", recData.AssetUid)
-		*reply = AssetParams{Status: "OK", Description: "Already scheduled"}
+		if reply != nil {
+			*reply = AssetParams{Status: "OK", Description: "Already scheduled"}
+		}
 		return nil
 	}
 	var ri AssetParams
@@ -449,7 +453,9 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	}
 	if ri.Status == "ready" {
 		log.Println("Asset already done processing:", recData.AssetUid)
-		*reply = AssetParams{Status: "OK", Description: "Already processed"}
+		if reply != nil {
+			*reply = AssetParams{Status: "OK", Description: "Already processed"}
+		}
 		return nil
 	}
 
@@ -459,18 +465,24 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	uTime, err := UnixTime(m.cfg.opts["timelayout"], []string{recData.Start, recData.End})
 	if err != nil {
 		log.Println("UnixTime error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 
 	// Get current local time in unix and duration in seconds
 	now := time.Now().Unix()
 	if uTime[recData.End] < now {
-		*reply = AssetParams{Status: "OK", Description: "End is in past"}
+		if reply != nil {
+			*reply = AssetParams{Status: "OK", Description: "End is in past"}
+		}
 		return nil
 	}
 	if uTime[recData.Start] > uTime[recData.End] {
-		*reply = AssetParams{Status: "OK", Description: "Start after end"}
+		if reply != nil {
+			*reply = AssetParams{Status: "OK", Description: "Start after end"}
+		}
 		return nil
 	}
 	if uTime[recData.Start] <= now {
@@ -494,13 +506,17 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	j, err := json.Marshal(recData)
 	if err != nil {
 		log.Println("ScheduleRecording json.Marshal error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 
 	if err := m.db.inst.Put([]byte(recData.AssetUid), j, nil); err != nil {
 		log.Println("m.db.inst.Put error:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 
@@ -599,12 +615,16 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 func (m *Methods) ModifyRecording(recData, reply *AssetParams) error {
 	if err := m.DeleteRecording(recData, nil); err != nil {
 		log.Println("ModifyRecording: Error deleting schedule:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 	if err := m.ScheduleRecording(recData, nil); err != nil {
 		log.Println("ModifyRecording: Error (re)scheduling:", err)
-		*reply = AssetParams{Status: "error", Description: err.Error()}
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
 		return err
 	}
 
