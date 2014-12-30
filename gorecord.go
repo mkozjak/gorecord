@@ -113,7 +113,7 @@ func (m *Methods) Init(cfg *Config) error {
 
 	// Connect to persistent key/value store
 	m.db = &Database{}
-	m.db.inst, err = leveldb.OpenFile("db", nil)
+	m.db.inst, err = leveldb.OpenFile("/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/db", nil)
 	if err != nil {
 		return err
 	}
@@ -201,6 +201,8 @@ func (m *Methods) SetInterface(iface string, reply *GenericReply) error {
 // CheckAsset method returns current asset's state
 // This method is rpc.Register compliant.
 func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
+	// TODO: check if a file physically exists ("nonexistent" status)
+	// if _, err := os.Stat(filename); os.IsNotExist(err) {
 	data, err := m.db.inst.Get([]byte(params.AssetUid), nil)
 	if err != nil && err.Error() == "leveldb: not found" {
 		*reply = GenericReply{Status: "OK", Description: "Asset not found"}
@@ -503,7 +505,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	}
 
 	// Start timer which will trigger the recording goroutine
-	log.Println("Scheduling asset:", recData.AssetUid, recData.Start)
+	log.Println("Scheduling asset:", recData.AssetUid, recData.Start, recData.End)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
@@ -763,6 +765,7 @@ func createAssetHash(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		log.Println(err)
+		return "", err
 	}
 	b := make([]byte, 1024)
 	e := b[:]
