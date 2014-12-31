@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/syndtr/goleveldb/leveldb"
-	"gopkg.in/ini.v0"
+	"gopkg.in/ini.v1"
 	"io"
 	"log"
 	"net"
