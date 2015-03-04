@@ -65,16 +65,17 @@ type GenericReply struct {
 
 // AssetParams represents recordings parameters.
 type AssetParams struct {
-	Status      string `json:"status,omitempty"`
-	Description string `json:"description,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Client      string `json:"client,omitempty"`
-	AssetUid    string `json:"asset_uid,omitempty"`
-	ChannelUid  string `json:"channel_uid,omitempty"`
-	Start       string `json:"start,omitempty"`
-	End         string `json:"end,omitempty"`
-	Check       string `json:"check,omitempty"`
-	Id          int    `json:"id,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Type          string `json:"type,omitempty"`
+	Client        string `json:"client,omitempty"`
+	AssetFilename string `json:"asset_filename,omitempty"`
+	AssetUid      string `json:"asset_uid,omitempty"`
+	ChannelUid    string `json:"channel_uid,omitempty"`
+	Start         string `json:"start,omitempty"`
+	End           string `json:"end,omitempty"`
+	Check         string `json:"check,omitempty"`
+	Id            int    `json:"id,omitempty"`
 }
 
 // ChParams represents channel parameters.
@@ -224,7 +225,7 @@ func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
 		}
 	}
 	if params.Status == "ready" || params.Status == "modified" {
-		md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + params.AssetUid)
+		md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + params.AssetFilename)
 		if err != nil {
 			log.Println("Failed to create md5 for asset", params.AssetUid, err)
 			*reply = GenericReply{Status: "error", Description: err.Error()}
@@ -238,15 +239,16 @@ func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
 
 		// Set state to "modified" or "ready"
 		uparams := AssetParams{
-			Status:     params.Status,
-			Type:       params.Type,
-			Client:     params.Client,
-			AssetUid:   params.AssetUid,
-			ChannelUid: params.ChannelUid,
-			Start:      params.Start,
-			End:        params.End,
-			Check:      params.Check,
-			Id:         params.Id,
+			Status:        params.Status,
+			Type:          params.Type,
+			Client:        params.Client,
+			AssetFilename: params.AssetFilename,
+			AssetUid:      params.AssetUid,
+			ChannelUid:    params.ChannelUid,
+			Start:         params.Start,
+			End:           params.End,
+			Check:         params.Check,
+			Id:            params.Id,
 		}
 		j, err := json.Marshal(uparams)
 		if err != nil {
@@ -493,6 +495,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	recType := recData.Type
 	recClient := recData.Client
 	recCh := recData.ChannelUid
+	recFname := recData.AssetFilename
 	recUid := recData.AssetUid
 	recStart := recData.Start
 	recEnd := recData.End
@@ -521,7 +524,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	}
 
 	// Start timer which will trigger the recording goroutine
-	log.Println("Scheduling asset:", recData.AssetUid, recData.Start, recData.End)
+	log.Println("Scheduling asset:", recData.AssetUid, recData.AssetFilename, recData.Start, recData.End)
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
@@ -536,18 +539,19 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
-		go Recorder(m.iface, m.cfg.opts["mediadir"], recUid, chdata.Address, chdata.Port, chdata.Type, ch)
+		go Recorder(m.iface, m.cfg.opts["mediadir"], recFname, chdata.Address, chdata.Port, chdata.Type, ch)
 
 		// Set state to "processing"
 		uparams := AssetParams{
-			Status:     "processing",
-			Type:       recType,
-			Client:     recClient,
-			AssetUid:   recUid,
-			ChannelUid: recCh,
-			Start:      recStart,
-			End:        recEnd,
-			Id:         recId,
+			Status:        "processing",
+			Type:          recType,
+			Client:        recClient,
+			AssetFilename: recFname,
+			AssetUid:      recUid,
+			ChannelUid:    recCh,
+			Start:         recStart,
+			End:           recEnd,
+			Id:            recId,
 		}
 		j, err := json.Marshal(uparams)
 		if err != nil {
@@ -572,15 +576,16 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 
 			// Set state to "ready"
 			uparams := AssetParams{
-				Status:     "ready",
-				Type:       recType,
-				Client:     recClient,
-				AssetUid:   recUid,
-				ChannelUid: recCh,
-				Start:      recStart,
-				End:        recEnd,
-				Check:      md5,
-				Id:         recId,
+				Status:        "ready",
+				Type:          recType,
+				Client:        recClient,
+				AssetFilename: recFname,
+				AssetUid:      recUid,
+				ChannelUid:    recCh,
+				Start:         recStart,
+				End:           recEnd,
+				Check:         md5,
+				Id:            recId,
 			}
 			j, err := json.Marshal(uparams)
 			if err != nil {
@@ -661,7 +666,7 @@ func (m *Methods) DeleteRecording(params *AssetParams, reply *GenericReply) erro
 	}
 	log.Println("Asset " + params.AssetUid + " removed")
 
-	absf := m.cfg.opts["mediadir"] + "/" + params.AssetUid
+	absf := m.cfg.opts["mediadir"] + "/" + params.AssetFilename
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
@@ -697,7 +702,7 @@ func UnixTime(format string, atimes []string) (map[string]int64, error) {
 }
 
 // Recorder function uses the provided network interface and url to record content.
-func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <-chan string) {
+func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string, ch <-chan string) {
 	ip := net.ParseIP(mcast)
 	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
 
@@ -722,16 +727,16 @@ func Recorder(iface *net.Interface, recdir, uid, mcast, port, stype string, ch <
 
 	// TODO: check if file already exists and mv old (?)
 	// FIXME: check if same recording and file already exists (before this func?)
-	file, err := os.OpenFile(recdir+"/"+uid, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(recdir+"/"+filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Println("error opening file for appending", uid, err)
+		log.Println("error opening file for appending", filename, err)
 	}
 
 	defer file.Close()
 
 	pktSock.SetMulticastInterface(iface)
 
-	log.Println("Recording asset:", uid)
+	log.Println("Recording asset:", filename)
 
 REC:
 	for {
@@ -739,7 +744,7 @@ REC:
 		select {
 		case msg := <-ch:
 			if msg == "stop" {
-				log.Println("Stop recording asset:", uid)
+				log.Println("Stop recording asset with filename:", filename)
 				break REC
 			}
 		default:
