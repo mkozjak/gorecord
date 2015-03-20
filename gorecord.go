@@ -24,7 +24,7 @@ import (
 var (
 	cfgFlag = flag.String(
 		"c",
-		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
+		"/etc/gorecord.ini",
 		"full path to config file")
 	srvFlag   = flag.Bool("l", false, "start server and listen for requests")
 	portFlag  = flag.String("p", "", "network port the jsonrpc server will listen on")
@@ -36,7 +36,7 @@ func init() {
 	flag.StringVar(
 		cfgFlag,
 		"config",
-		"/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/conf.gcfg",
+		"/etc/gorecord.ini",
 		"full path to config file")
 	flag.BoolVar(srvFlag, "listen", false, "start server and listen for requests")
 	flag.StringVar(portFlag, "port", "", "network port the jsonrpc server will listen on")
@@ -114,7 +114,7 @@ func (m *Methods) Init(cfg *Config) error {
 
 	// Connect to persistent key/value store
 	m.db = &Database{}
-	m.db.inst, err = leveldb.OpenFile("/home/mkozjak/git/gospace/src/github.com/mkozjak/gorecord/db", nil)
+	m.db.inst, err = leveldb.OpenFile("/var/lib/gorecord/db", nil)
 	if err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
-			log.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ":" + err.Error())
+			log.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ": " + err.Error())
 			return
 		}
 
@@ -568,9 +568,9 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 			ch <- "stop"
 
 			// Create a simple md5 sum
-			md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + recUid)
+			md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + recFname)
 			if err != nil {
-				log.Println("Failed to create md5 for asset", recUid, err)
+				log.Println("Failed to create md5 for asset", recFname, err)
 				md5 = ""
 			}
 
