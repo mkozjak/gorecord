@@ -227,7 +227,7 @@ func (m *Methods) CheckAsset(params *AssetParams, reply *GenericReply) error {
 	if params.Status == "ready" || params.Status == "modified" {
 		md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + params.AssetFilename)
 		if err != nil {
-			log.Println("Failed to create md5 for asset", params.AssetUid, err)
+			log.Println("CheckAsset: Failed to create md5 for asset", params.AssetUid, err)
 			*reply = GenericReply{Status: "error", Description: err.Error()}
 			return err
 		}
@@ -570,7 +570,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 			// Create a simple md5 sum
 			md5, err := createAssetHash(m.cfg.opts["mediadir"] + "/" + recFname)
 			if err != nil {
-				log.Println("Failed to create md5 for asset", recFname, err)
+				log.Println("ScheduleRecording: Failed to create md5 for asset", recFname, err)
 				md5 = ""
 			}
 
