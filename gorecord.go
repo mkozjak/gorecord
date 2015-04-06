@@ -30,6 +30,7 @@ var (
 	portFlag  = flag.String("p", "", "network port the jsonrpc server will listen on")
 	ifaceFlag = flag.String("i", "", "network interface used for capturing the stream media")
 	mdirFlag  = flag.String("m", "", "recorded media filesystem location")
+	dbFlag    = flag.String("d", "", "leveldb location")
 )
 
 func init() {
@@ -42,6 +43,7 @@ func init() {
 	flag.StringVar(portFlag, "port", "", "network port the jsonrpc server will listen on")
 	flag.StringVar(ifaceFlag, "interface", "", "network interface used for capturing the stream media")
 	flag.StringVar(mdirFlag, "mediadir", "", "recorded media filesystem location")
+	flag.StringVar(dbFlag, "database", "", "leveldb location")
 }
 
 // Config represents an application configuration instance.
@@ -114,7 +116,7 @@ func (m *Methods) Init(cfg *Config) error {
 
 	// Connect to persistent key/value store
 	m.db = &Database{}
-	m.db.inst, err = leveldb.OpenFile("/var/lib/gorecord/db", nil)
+	m.db.inst, err = leveldb.OpenFile(cfg.opts["database"], nil)
 	if err != nil {
 		return err
 	}
@@ -832,6 +834,11 @@ func setConfig(cfg *Config) {
 		cfg.opts["mediadir"] = *mdirFlag
 	} else if *mdirFlag == "" && cfg.opts["mediadir"] == "" {
 		cfg.opts["mediadir"] = "/media"
+	}
+	if *dbFlag != "" {
+		cfg.opts["database"] = *dbFlag
+	} else if *dbFlag == "" && cfg.opts["database"] == "" {
+		cfg.opts["database"] = "/var/lib/gorecord/db"
 	}
 }
 
