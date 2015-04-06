@@ -37,6 +37,10 @@ Schedule/record content (JSON-RPC 2.0):
     Method: 'Methods.ScheduleRecording'
     Params: [{ 'recording_uid': '861', 'channel_uid': 'mychannel', 'start': '2015-12-07T16:42:00+0100', 'end': '2015-12-07T16:42:20+0100' }]
 
+Running with Docker:
+
+    docker run --name gorecord --net=host -it -v /path/to/conf/gorecord.ini:/conf/gorecord.ini docker.registry.com/gorecord:latest /gorecord -l -c conf/gorecord.ini
+
 Documentation
 -----------
 
