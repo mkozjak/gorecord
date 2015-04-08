@@ -17,6 +17,7 @@ import (
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"os"
+	"os/exec"
 	"time"
 )
 
@@ -747,6 +748,13 @@ REC:
 		case msg := <-ch:
 			if msg == "stop" {
 				log.Println("Stop recording asset with filename:", filename)
+
+				// Index file when recording ends
+				err := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Start()
+				if err != nil {
+					log.Println("indexing error for", filename, err)
+				}
+
 				break REC
 			}
 		default:
