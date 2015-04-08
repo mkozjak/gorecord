@@ -30,7 +30,7 @@ var (
 	portFlag  = flag.String("p", "", "network port the jsonrpc server will listen on")
 	ifaceFlag = flag.String("i", "", "network interface used for capturing the stream media")
 	mdirFlag  = flag.String("m", "", "recorded media filesystem location")
-	dbFlag    = flag.String("d", "", "leveldb location")
+	dbFlag    = flag.String("d", "/var/lib/gorecord/db", "leveldb location")
 )
 
 func init() {
@@ -43,7 +43,7 @@ func init() {
 	flag.StringVar(portFlag, "port", "", "network port the jsonrpc server will listen on")
 	flag.StringVar(ifaceFlag, "interface", "", "network interface used for capturing the stream media")
 	flag.StringVar(mdirFlag, "mediadir", "", "recorded media filesystem location")
-	flag.StringVar(dbFlag, "database", "", "leveldb location")
+	flag.StringVar(dbFlag, "database", "/var/lib/gorecord/db", "leveldb location")
 }
 
 // Config represents an application configuration instance.
