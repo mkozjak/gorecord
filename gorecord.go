@@ -868,9 +868,14 @@ REC:
 
 	// Index file when recording ends
 	log.Println("Indexing file", filename)
-	err = exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Start()
+	cmd := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx")
+	err = cmd.Start()
 	if err != nil {
 		log.Println("indexing error for", filename, err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		log.Println("bvodindexer process error:", err)
 	}
 }
 
