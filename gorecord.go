@@ -94,7 +94,8 @@ type ChParams struct {
 
 // TaskProps represents scheduled task properties.
 type TaskProps struct {
-	Timer      *time.Timer
+	StartTimer *time.Timer
+	EndTimer   *time.Timer
 	Channel    chan string
 	Start      int64
 	End        int64
@@ -374,7 +375,7 @@ func (m *Methods) DeleteChannel(params *ChParams, reply *GenericReply) error {
 			continue
 		}
 
-		s := m.tasks[recUid].Timer.Stop()
+		s := m.tasks[recUid].StartTimer.Stop()
 		if s == true {
 			log.Println("Task " + recUid + " stopped and removed")
 		} else {
@@ -480,7 +481,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	now := time.Now().Unix()
 	if uTime[recData.End] < now {
 		if reply != nil {
-			*reply = AssetParams{Status: "OK", Description: "End is in past"}
+			*reply = AssetParams{Status: "OK", Description: "End is in the past"}
 		}
 		return nil
 	}
@@ -528,7 +529,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 
 	// Start timer which will trigger the recording goroutine
 	log.Println("Scheduling asset:", recData.AssetUid, recData.AssetFilename, recData.Start, recData.End)
-	timer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
+	stimer := time.AfterFunc(time.Duration(uTime[recData.Start]-now)*time.Second, func() {
 		data, err := m.db.inst.Get([]byte(recCh), nil)
 		if err != nil {
 			log.Println("time.AfterFunc m.db.inst.Get error for " + recData.ChannelUid + ": " + err.Error())
@@ -567,7 +568,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 		}
 
 		// Start timer which will stop the recording goroutine
-		time.AfterFunc(time.Duration(dur)*time.Second, func() {
+		m.tasks[recData.AssetUid].EndTimer = time.AfterFunc(time.Duration(dur)*time.Second, func() {
 			ch <- "stop"
 
 			// Create a simple md5 sum
@@ -605,7 +606,7 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 	})
 
 	m.tasks[recData.AssetUid] = &TaskProps{
-		Timer:      timer,
+		StartTimer: stimer,
 		Channel:    ch,
 		Start:      uTime[recData.Start],
 		End:        uTime[recData.End],
@@ -621,6 +622,83 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 // ModifyRecording method reschedules a recording according to provided parameters.
 // This method is rpc.Register compliant.
 func (m *Methods) ModifyRecording(recData, reply *AssetParams) error {
+	// Get start/end times in unix
+	uTime, err := UnixTime(m.cfg.opts["timelayout"], []string{recData.Start, recData.End})
+	if err != nil {
+		log.Println("UnixTime error:", err)
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: err.Error()}
+		}
+		return err
+	}
+
+	data, err := m.db.inst.Get([]byte(recData.AssetUid), nil)
+	if err != nil && err.Error() == "leveldb: not found" {
+		*reply = AssetParams{Status: "OK", Description: "Not found"}
+		return nil
+	} else if err != nil {
+		log.Println("GetRecording m.db.inst.Get error:", err)
+		*reply = AssetParams{Status: "error", Description: err.Error()}
+		return err
+	}
+
+	var currParams AssetParams
+	if err := json.Unmarshal(data, &currParams); err != nil {
+		log.Println("GetRecording json.Unmarshal error:", err)
+		return err
+	}
+
+	// Check if job is processing and modify timer
+	now := time.Now().Unix()
+
+	if currParams.Status == "ready" {
+		log.Println("Cannot modify asset which is already done processing")
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: "Asset already done processing"}
+		}
+		return err
+	}
+
+	if uTime[recData.End] < now {
+		log.Println("End is in the past! (placeholder)")
+		if reply != nil {
+			*reply = AssetParams{Status: "error", Description: "End is in the past"}
+		}
+		return err
+	}
+
+	if uTime[recData.Start] < now && uTime[recData.End] > now && currParams.Status == "processing" {
+		if m.tasks[recData.AssetUid].EndTimer.Reset(time.Duration(uTime[recData.End]-now)*time.Second) == false {
+			*reply = AssetParams{Status: "error", Description: "Already stopped or expired"}
+			return err
+		}
+		log.Println("Task end time reset for asset uid " + recData.AssetUid + " done")
+
+		m.tasks[recData.AssetUid].End = uTime[recData.End]
+
+		// Update task properties in database
+		currParams.End = recData.End
+		j, err := json.Marshal(currParams)
+		if err != nil {
+			log.Println("ModifyRecording json.Marshal error:", err)
+			if reply != nil {
+				*reply = AssetParams{Status: "error", Description: err.Error()}
+			}
+			return err
+		}
+
+		if err := m.db.inst.Put([]byte(recData.AssetUid), j, nil); err != nil {
+			log.Println("m.db.inst.Put error:", err)
+			if reply != nil {
+				*reply = AssetParams{Status: "error", Description: err.Error()}
+			}
+			return err
+		}
+
+		*reply = AssetParams{Status: "OK"}
+		return nil
+	}
+
 	if err := m.DeleteRecording(recData, nil); err != nil {
 		log.Println("ModifyRecording: Error deleting schedule:", err)
 		if reply != nil {
@@ -645,11 +723,11 @@ func (m *Methods) ModifyRecording(recData, reply *AssetParams) error {
 func (m *Methods) DeleteRecording(params *AssetParams, reply *GenericReply) error {
 	// Stop and delete a scheduled task (timer)
 	if _, ok := m.tasks[params.AssetUid]; ok {
-		s := m.tasks[params.AssetUid].Timer.Stop()
+		s := m.tasks[params.AssetUid].StartTimer.Stop()
 		if s == true {
-			log.Println("Task " + params.AssetUid + " stopped and removed")
+			log.Println("Start timer for task " + params.AssetUid + " stopped and removed")
 		} else {
-			log.Println("Task " + params.AssetUid + " already stopped or expired")
+			log.Println("Start timer for task " + params.AssetUid + " already expired")
 		}
 
 		// Stop recording
@@ -738,6 +816,7 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	defer file.Close()
 
 	pktSock.SetMulticastInterface(iface)
+	pktSock.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	log.Println("Recording asset:", filename)
 
@@ -749,12 +828,6 @@ REC:
 			if msg == "stop" {
 				log.Println("Stop recording asset with filename:", filename)
 
-				// Index file when recording ends
-				err := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Start()
-				if err != nil {
-					log.Println("indexing error for", filename, err)
-				}
-
 				break REC
 			}
 		default:
@@ -764,8 +837,7 @@ REC:
 		pkt := make([]byte, 1500)
 		n, cmsg, _, err := pktSock.ReadFrom(pkt)
 		if err != nil {
-			log.Println("pktSock.ReadFrom failed")
-			return
+			continue
 		}
 
 		// Check if created packet buffer is too large and slice it if needed
@@ -792,6 +864,13 @@ REC:
 				continue
 			}
 		}
+	}
+
+	// Index file when recording ends
+	log.Println("Indexing file", filename)
+	err = exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Start()
+	if err != nil {
+		log.Println("indexing error for", filename, err)
 	}
 }
 
@@ -854,7 +933,7 @@ func main() {
 	flag.Parse()
 
 	if flag.NFlag() < 1 {
-		fmt.Println("gorecord 0.0.2\n\nUsage:")
+		fmt.Println("gorecord 0.0.3\n\nUsage:")
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
@@ -869,7 +948,7 @@ func main() {
 	if err != nil && *srvFlag == true {
 		log.Fatalln("Error reading config file:", err)
 	}
-	cfg := Config{fh.Section("").KeysHash(), fh}
+	cfg := Config{fh.Section("main").KeysHash(), fh}
 
 	// We cannot set defaults via `flag` because we have to check for ini first
 	setConfig(&cfg)
