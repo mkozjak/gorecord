@@ -953,7 +953,7 @@ func main() {
 	if err != nil && *srvFlag == true {
 		log.Fatalln("Error reading config file:", err)
 	}
-	cfg := Config{fh.Section("main").KeysHash(), fh}
+	cfg := Config{fh.Section("").KeysHash(), fh}
 
 	// We cannot set defaults via `flag` because we have to check for ini first
 	setConfig(&cfg)
