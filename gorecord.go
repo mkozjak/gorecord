@@ -808,7 +808,7 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 
 	// TODO: check if file already exists and mv old (?)
 	// FIXME: check if same recording and file already exists (before this func?)
-	file, err := os.OpenFile(recdir+"/"+filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(recdir+"/"+filename, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println("error opening file for appending", filename, err)
 	}
