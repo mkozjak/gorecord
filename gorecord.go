@@ -816,7 +816,6 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	defer file.Close()
 
 	pktSock.SetMulticastInterface(iface)
-	pktSock.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	log.Println("Recording asset:", filename)
 
