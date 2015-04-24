@@ -833,17 +833,10 @@ REC:
 			break
 		}
 
-		pkt := make([]byte, 1500)
-		n, cmsg, _, err := pktSock.ReadFrom(pkt)
+		pkt := make([]byte, 1328)
+		_, cmsg, _, err := pktSock.ReadFrom(pkt)
 		if err != nil {
 			continue
-		}
-
-		// Check if created packet buffer is too large and slice it if needed
-		if len(pkt) > n {
-			newPkt := make([]byte, n)
-			copy(newPkt, pkt)
-			pkt = newPkt
 		}
 
 		// If stream is via RTP, slice off rtp header
