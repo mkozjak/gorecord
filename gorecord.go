@@ -18,6 +18,8 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 	"os/exec"
+	"os/signal"
+	"runtime/pprof"
 	"sync"
 	"time"
 )
@@ -936,6 +938,23 @@ func setConfig(cfg *Config) {
 
 func main() {
 	flag.Parse()
+
+	file, err := os.OpenFile("/media/recordings/gorecord_cpuprofile.dmp", os.O_CREATE, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(file)
+	// defer pprof.StopCPUProfile()
+
+	csig := make(chan os.Signal, 1)
+	signal.Notify(csig, os.Interrupt)
+	go func() {
+		for sig := range csig {
+			log.Printf("Captured %v, stopping profiler and exiting...", sig)
+			pprof.StopCPUProfile()
+			os.Exit(0)
+		}
+	}()
 
 	if flag.NFlag() < 1 {
 		fmt.Println("gorecord 0.0.3\n\nUsage:")
