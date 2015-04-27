@@ -18,6 +18,7 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -783,7 +784,7 @@ func UnixTime(format string, atimes []string) (map[string]int64, error) {
 }
 
 // Recorder function uses the provided network interface and url to record content.
-func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string, ch <-chan string) {
+func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string, runCh <-chan string) {
 	ip := net.ParseIP(mcast)
 	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
 
@@ -806,16 +807,17 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 		return
 	}
 
-	// TODO: check if file already exists and mv old (?)
-	// FIXME: check if same recording and file already exists (before this func?)
+	pktSock.SetMulticastInterface(iface)
+
 	file, err := os.OpenFile(recdir+"/"+filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Println("error opening file for appending", filename, err)
+		log.Println("error opening file ", filename, err)
 	}
 
 	defer file.Close()
 
-	pktSock.SetMulticastInterface(iface)
+	writeCh := make(chan []byte, 20)
+	go fileWriter(file, writeCh)
 
 	log.Println("Recording asset:", filename)
 
@@ -823,7 +825,7 @@ REC:
 	for {
 		// Check if parent called 'stop'
 		select {
-		case msg := <-ch:
+		case msg := <-runCh:
 			if msg == "stop" {
 				log.Println("Stop recording asset with filename:", filename)
 
@@ -847,11 +849,7 @@ REC:
 		// Store file
 		if cmsg.Dst.IsMulticast() {
 			if cmsg.Dst.Equal(group) {
-				_, err := file.Write(pkt)
-				if err != nil {
-					log.Println("error writing to file")
-					return
-				}
+				writeCh <- pkt
 			} else {
 				continue
 			}
@@ -868,6 +866,16 @@ REC:
 	err = cmd.Wait()
 	if err != nil {
 		log.Println("bvodindexer process error:", err)
+	}
+}
+
+func fileWriter(file *os.File, ch <-chan []byte) {
+	mu := &sync.Mutex{}
+
+	for {
+		mu.Lock()
+		file.Write(<-ch)
+		mu.Unlock()
 	}
 }
 
