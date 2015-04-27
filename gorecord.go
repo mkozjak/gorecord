@@ -939,12 +939,11 @@ func setConfig(cfg *Config) {
 func main() {
 	flag.Parse()
 
-	file, err := os.OpenFile("/media/recordings/gorecord_cpuprofile.dmp", os.O_CREATE, 0644)
+	file, err := os.OpenFile("/media/recordings/gorecord_cpuprofile.dmp", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
 	pprof.StartCPUProfile(file)
-	// defer pprof.StopCPUProfile()
 
 	csig := make(chan os.Signal, 1)
 	signal.Notify(csig, os.Interrupt)
