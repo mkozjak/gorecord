@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/davecheney/profile"
 	"github.com/syndtr/goleveldb/leveldb"
 	"gopkg.in/ini.v1"
 	"io"
@@ -19,7 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime/pprof"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -544,6 +545,10 @@ func (m *Methods) ScheduleRecording(recData, reply *AssetParams) error {
 			log.Println("time.AfterFunc json.Unmarshal error:", err)
 			return
 		}
+		if chdata.Address == "" {
+			log.Printf("chdata.Address for %s is empty", recCh)
+			return
+		}
 
 		// Run Recorder and set a timer function to stop recording when End time is reached
 		go Recorder(m.iface, m.cfg.opts["mediadir"], recFname, chdata.Address, chdata.Port, chdata.Type, ch)
@@ -937,20 +942,23 @@ func setConfig(cfg *Config) {
 }
 
 func main() {
+	runtime.GOMAXPROCS(2)
 	flag.Parse()
 
-	file, err := os.OpenFile("/media/recordings/gorecord_cpuprofile.dmp", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal(err)
+	profCfg := profile.Config{
+		CPUProfile:     true,
+		MemProfile:     false,
+		ProfilePath:    "/media/recordings/profiling",
+		NoShutdownHook: true,
 	}
-	pprof.StartCPUProfile(file)
+	p := profile.Start(&profCfg)
 
 	csig := make(chan os.Signal, 1)
 	signal.Notify(csig, os.Interrupt)
 	go func() {
 		for sig := range csig {
 			log.Printf("Captured %v, stopping profiler and exiting...", sig)
-			pprof.StopCPUProfile()
+			p.Stop()
 			os.Exit(0)
 		}
 	}()
