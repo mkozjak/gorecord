@@ -3,6 +3,7 @@ Installation and requirements
     go get code.google.com/p/gcfg
     go get code.google.com/p/go.net/ipv4
     go get github.com/syndtr/goleveldb/leveldb
+    go get gopkg.in/ini.v1
 
 * Needs at least `go1.3.3` or newer.
 
