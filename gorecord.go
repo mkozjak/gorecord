@@ -790,7 +790,7 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 
 	localSock, err := net.ListenPacket("udp4", mcast+":"+port)
 	if err != nil {
-		log.Println("net.ListenPacket failed")
+		log.Println("net.ListenPacket failed:", err)
 		return
 	}
 
@@ -798,12 +798,12 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	pktSock := ipv4.NewPacketConn(localSock)
 
 	if err := pktSock.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		log.Println("pktSock.SetControlMessage failed for", mcast, port)
+		log.Println("pktSock.SetControlMessage failed for", mcast, port, err)
 		return
 	}
 
 	if err := pktSock.JoinGroup(iface, &net.UDPAddr{IP: group}); err != nil {
-		log.Println("Failed to join mcast", mcast, port)
+		log.Println("Failed to join mcast", mcast, port, err)
 		return
 	}
 
