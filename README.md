@@ -8,6 +8,7 @@ Installation and requirements
 * Needs at least `go1.3.3` or newer.
 
 If you want to build it statically, use this command:
+
     CGO_ENABLED=0 go build -a -installsuffix gorecord.go
 
 Usage
