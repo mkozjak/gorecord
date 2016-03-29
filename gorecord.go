@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"code.google.com/p/go.net/ipv4"
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/hex"
@@ -10,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/syndtr/goleveldb/leveldb"
+	"golang.org/x/net/ipv4"
 	"gopkg.in/ini.v1"
 	"io"
 	"log"
@@ -784,7 +784,7 @@ func UnixTime(format string, atimes []string) (map[string]int64, error) {
 }
 
 // Recorder function uses the provided network interface and url to record content.
-func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string, runCh <-chan string) {
+func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string, runCh chan string) {
 	ip := net.ParseIP(mcast)
 	group := net.IPv4(ip[12], ip[13], ip[14], ip[15])
 
@@ -812,6 +812,7 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	file, err := os.OpenFile(recdir+"/"+filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println("error opening file ", filename, err)
+		return
 	}
 
 	defer file.Close()
@@ -820,6 +821,14 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	go fileWriter(file, writeCh)
 
 	log.Println("Recording asset:", filename)
+
+	// Set periodic indexing
+	ticker := time.NewTicker(time.Second)
+	go func() {
+		for _ = range ticker.C {
+			runCh <- "index"
+		}
+	}()
 
 REC:
 	for {
@@ -830,6 +839,15 @@ REC:
 				log.Println("Stop recording asset with filename:", filename)
 
 				break REC
+			}
+
+			if msg == "index" {
+				go func() {
+					cmd := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx")
+					cmd.Start()
+				}()
+
+				continue
 			}
 		default:
 			break
