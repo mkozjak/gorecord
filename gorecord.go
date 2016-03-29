@@ -823,7 +823,7 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	log.Println("Recording asset:", filename)
 
 	// Set periodic indexing
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(time.Minute)
 	go func() {
 		for _ = range ticker.C {
 			runCh <- "index"
