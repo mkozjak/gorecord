@@ -749,12 +749,22 @@ func (m *Methods) DeleteRecording(params *AssetParams, reply *GenericReply) erro
 	log.Println("Asset " + params.AssetUid + " removed")
 
 	absf := m.cfg.opts["mediadir"] + "/" + params.AssetFilename
+	absfi := m.cfg.opts["mediadir"] + "/" + params.AssetFilename + ".idx"
 
 	// Delete file from fs (if it exists)
 	if _, err := os.Stat(absf); err == nil {
 		log.Println("Deleting asset:", absf)
 		if err := os.Remove(absf); err != nil {
 			log.Println("DeleteRecording os.Remove error:", err)
+			return err
+		}
+	}
+
+	// Delete index file from fs (if it exists)
+	if _, err := os.Stat(absfi); err == nil {
+		log.Println("Deleting asset index:", absfi)
+		if err := os.Remove(absfi); err != nil {
+			log.Println("DeleteRecording index os.Remove error:", err)
 			return err
 		}
 	}
