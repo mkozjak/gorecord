@@ -854,7 +854,17 @@ REC:
 			if msg == "index" {
 				go func() {
 					cmd := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx")
+
 					cmd.Start()
+					if err != nil {
+						log.Println("indexing error for", filename, err)
+						return
+					}
+
+					err = cmd.Wait()
+					if err != nil {
+						log.Println("bvodindexer process error:", err)
+					}
 				}()
 
 				continue
