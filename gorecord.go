@@ -853,18 +853,13 @@ REC:
 
 			if msg == "index" {
 				go func() {
-					cmd := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx")
-
-					cmd.Start()
+					out, err := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Output
 					if err != nil {
 						log.Println("indexing error for", filename, err)
 						return
 					}
 
-					err = cmd.Wait()
-					if err != nil {
-						log.Println("bvodindexer process error:", err)
-					}
+					log.Println("output:", out)
 				}()
 
 				continue
@@ -896,15 +891,13 @@ REC:
 
 	// Index file when recording ends
 	log.Println("Indexing file", filename)
-	cmd := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx")
-	err = cmd.Start()
+	out, err := exec.Command("/bvodindexer", recdir+"/"+filename, recdir+"/"+filename+".idx").Output
 	if err != nil {
 		log.Println("indexing error for", filename, err)
+		return
 	}
-	err = cmd.Wait()
-	if err != nil {
-		log.Println("bvodindexer process error:", err)
-	}
+
+	log.Println("bvodindexer process output:", out)
 }
 
 func fileWriter(file *os.File, ch <-chan []byte) {
