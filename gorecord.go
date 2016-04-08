@@ -13,6 +13,7 @@ import (
 	"gopkg.in/ini.v1"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -833,7 +834,9 @@ func Recorder(iface *net.Interface, recdir, filename, mcast, port, stype string,
 	log.Println("Recording asset:", filename)
 
 	// Set periodic indexing
-	ticker := time.NewTicker(time.Minute)
+	rand.Seed(time.Now().Unix())
+
+	ticker := time.NewTicker(time.Second * time.Duration((rand.Intn(90-60) + 60)))
 	go func() {
 		for _ = range ticker.C {
 			runCh <- "index"
