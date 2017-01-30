@@ -1,7 +1,3 @@
-*** Important ***
------------
-Should be used only for testing purposes.
-
 Installation and requirements
 -----------
     go get code.google.com/p/gcfg
